@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/models.dart';
+import '../services/utils_extensions.dart';
 import 'site_settings_page.dart';
 import 'job_settings_page.dart';
 import 'location_settings_page.dart';
@@ -11,8 +12,7 @@ class ProjectSettingsPage extends StatefulWidget {
   final String activeJobId;
   final String activeLocationId;
   final UserProfile profile;
-  final Future<void> Function(
-          List<Site>, String, String, String) onChanged;
+  final Future<void> Function(List<Site>, String, String, String) onChanged;
 
   const ProjectSettingsPage({
     super.key,
@@ -105,7 +105,6 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                         setState(() {
                           _sites = newSites;
                           _activeSiteId = newId;
-                          // Reset child selections
                           _activeJobId = '';
                           _activeLocationId = '';
                         });
@@ -135,8 +134,8 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                       activeJobId: _activeJobId,
                       onChanged: (updatedSite, newJobId) async {
                         setState(() {
-                          final i = _sites.indexWhere(
-                              (s) => s.id == updatedSite.id);
+                          final i = _sites
+                              .indexWhere((s) => s.id == updatedSite.id);
                           if (i >= 0) _sites[i] = updatedSite;
                           _activeJobId = newJobId;
                           _activeLocationId = '';
@@ -167,8 +166,8 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                       activeLocationId: _activeLocationId,
                       onChanged: (updatedJob, newLocId) async {
                         setState(() {
-                          final si = _sites.indexWhere(
-                              (s) => s.id == _activeSiteId);
+                          final si =
+                              _sites.indexWhere((s) => s.id == _activeSiteId);
                           if (si >= 0) {
                             final ji = _sites[si]
                                 .jobs
@@ -189,25 +188,26 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
             ),
 
             if (_activeLocation != null &&
-                _activeLocation!.drops.isNotEmpty)
+                _activeLocation!.testGroups.isNotEmpty)
               _menuButton(
                 icon: Icons.list,
                 title: 'Drop List',
-                subtitle: '${_activeLocation!.drops.length} drops',
+                subtitle:
+                    '${_activeLocation!.testGroups.length} test group(s)',
                 color: Colors.orangeAccent,
                 onTap: () async {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>  DropListPage(
-  location: _activeLocation!,
-  profile: widget.profile,
-  siteName: _activeSite?.name ?? '',
-  jobName: _activeJob?.name ?? '',
-  onChanged: (updated) async {
+                      builder: (_) => DropListPage(
+                        location: _activeLocation!,
+                        profile: widget.profile,
+                        siteName: _activeSite?.name ?? '',
+                        jobName: _activeJob?.name ?? '',
+                        onChanged: (updated) async {
                           setState(() {
-                            final si = _sites.indexWhere(
-                                (s) => s.id == _activeSiteId);
+                            final si = _sites
+                                .indexWhere((s) => s.id == _activeSiteId);
                             if (si >= 0) {
                               final ji = _sites[si]
                                   .jobs
@@ -216,8 +216,8 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                                 final li = _sites[si]
                                     .jobs[ji]
                                     .locations
-                                    .indexWhere((l) =>
-                                        l.id == _activeLocationId);
+                                    .indexWhere(
+                                        (l) => l.id == _activeLocationId);
                                 if (li >= 0) {
                                   _sites[si].jobs[ji].locations[li] = updated;
                                 }
@@ -235,7 +235,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
 
             const SizedBox(height: 20),
             const Text(
-              'Hierarchy:\nSite → Job → Location → Drop',
+              'Hierarchy:\nSite → Job → Location → Test Group',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey, fontSize: 11),
             ),
@@ -253,8 +253,8 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
           SizedBox(
             width: 100,
             child: Text(label,
-                style: TextStyle(
-                    color: Colors.grey.shade500, fontSize: 11)),
+                style:
+                    TextStyle(color: Colors.grey.shade500, fontSize: 11)),
           ),
           Expanded(
             child: Text(value,
@@ -323,14 +323,5 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
         ),
       ),
     );
-  }
-}
-
-extension FirstWhereOrNull<E> on List<E> {
-  E? firstWhereOrNull(bool Function(E) test) {
-    for (final e in this) {
-      if (test(e)) return e;
-    }
-    return null;
   }
 }

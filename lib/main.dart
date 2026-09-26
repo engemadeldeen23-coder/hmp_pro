@@ -1,3 +1,4 @@
+import 'services/utils_extensions.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -1103,14 +1104,5 @@ class _HomePageState extends State<HomePage> {
       SnackBar(
           content: Text(m), duration: const Duration(seconds: 2)),
     );
-  }
-}
-
-extension FirstWhereOrNull<E> on List<E> {
-  E? firstWhereOrNull(bool Function(E) test) {
-    for (final e in this) {
-      if (test(e)) return e;
-    }
-    return null;
   }
 }
