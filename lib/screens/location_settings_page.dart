@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 import '../models/models.dart';
 import '../services/gps_service.dart';
-import 'dart:io';
 
 class LocationSettingsPage extends StatefulWidget {
   final Job job;
@@ -90,7 +90,7 @@ class _LocationSettingsPageState extends State<LocationSettingsPage> {
 
   Future<void> _deleteLocation(Location loc) async {
     final ok = await _confirm(
-        'Delete location "${loc.name}"?\nAll drops will be erased.');
+        'Delete location "${loc.name}"?\nAll test groups will be erased.');
     if (ok != true) return;
     setState(() {
       _job.locations.removeWhere((l) => l.id == loc.id);
@@ -280,7 +280,7 @@ class _LocationSettingsPageState extends State<LocationSettingsPage> {
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            '${loc.drops.length} drops • ${loc.testCount} tests',
+                            '${loc.testGroups.length} test group(s) • ${loc.totalTests} test drops',
                             style: TextStyle(
                                 color: Colors.grey.shade600, fontSize: 10),
                           ),
