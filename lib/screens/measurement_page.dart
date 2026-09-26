@@ -64,21 +64,27 @@ class _MeasurementPageState extends State<MeasurementPage> {
   int _preloadIndex = 0;
   int _testIndex = 0;
 
-  // Current drop being captured
+  // Live values
   double _currentEvd = 0;
   double _currentDef = 0;
   double _currentAcc = 0;
   double _currentVel = 0;
   bool _hasCurrentReading = false;
 
-  // Collected
-  final List<double> _testEvds = [];
-  final List<double> _testDefs = [];
-  final List<Drop> _pendingDrops = [];
+  // Curves (live, cleared on each new drop)
+  final List<double> _liveSettlement = [];
+  final List<double> _liveVelocity = [];
+  bool _collecting = false;
+
+  // Collected TEST drops only (preloads discarded)
+  final List<Drop> _testDrops = [];
   double _avgEvd = 0;
 
   StreamSubscription? _dataSub;
   bool _busy = false;
+
+  // Curve capture helper
+  DateTime? _curveStart;
 
   @override
   void initState() {
@@ -112,45 +118,53 @@ class _MeasurementPageState extends State<MeasurementPage> {
       _hasCurrentReading = true;
     });
 
-    // If we're in collecting state, register the drop
-    if (_stage == MeasurementStage.collectingPreload) {
-      _captureDrop(isPreload: true);
-    } else if (_stage == MeasurementStage.collectingTest) {
-      _captureDrop(isPreload: false);
+    // Capture curves during collection window
+    if (_collecting) {
+      _liveSettlement.add(def);
+      _liveVelocity.add(vel);
+      if (_liveSettlement.length > 200) {
+        _liveSettlement.removeAt(0);
+        _liveVelocity.removeAt(0);
+      }
+    }
+
+    // Detect drop during collection
+    if ((_stage == MeasurementStage.collectingPreload ||
+            _stage == MeasurementStage.collectingTest) &&
+        def > 0.01) {
+      _captureDrop(isPreload: _stage == MeasurementStage.collectingPreload);
     }
   }
 
   Future<void> _captureDrop({required bool isPreload}) async {
     if (_busy) return;
     _busy = true;
+    _collecting = false;
 
-    final pos = widget.gpsRecordingEnabled ? widget.gps.current : null;
-    final drop = Drop(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      time: DateTime.now(),
-      dropNumber: _pendingDrops.length + 1,
-      isPreload: isPreload,
-      evd: _currentEvd,
-      deflection: _currentDef,
-      acceleration: _currentAcc,
-      velocity: _currentVel,
-      latitude: pos?.latitude ?? 0,
-      longitude: pos?.longitude ?? 0,
-      accuracy: pos?.accuracy ?? 0,
-      photoPath: null,
-      plateRadius: widget.dropSettings.plateRadius,
-    );
-
-    _pendingDrops.add(drop);
+    // Only keep test drops (drop preloads per requirements)
+    if (!isPreload) {
+      final drop = Drop(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        time: DateTime.now(),
+        dropNumber: _testDrops.length + 1,
+        evd: _currentEvd,
+        deflection: _currentDef,
+        acceleration: _currentAcc,
+        velocity: _currentVel,
+        settlementCurve: List<double>.from(_liveSettlement),
+        velocityCurve: List<double>.from(_liveVelocity),
+      );
+      _testDrops.add(drop);
+    }
 
     HapticFeedback.mediumImpact();
 
     if (isPreload) {
-      setState(() {
-        _stage = MeasurementStage.idle;
-      });
-      widget.voice.say('Preload ${_preloadIndex} complete');
+      setState(() => _stage = MeasurementStage.idle);
+      widget.voice.say('Preload ${_preloadIndex + 1} complete');
       _preloadIndex++;
+      _liveSettlement.clear();
+      _liveVelocity.clear();
 
       if (_preloadIndex >= _preloadCount) {
         widget.voice.say('Preloads complete. Ready for first test');
@@ -161,23 +175,21 @@ class _MeasurementPageState extends State<MeasurementPage> {
         if (mounted) _beginPreload();
       }
     } else {
-      _testEvds.add(_currentEvd);
-      _testDefs.add(_currentDef);
-
-      setState(() {
-        _stage = MeasurementStage.idle;
-      });
-
-      widget.voice.say('Test ${_testIndex} complete, EVD ${_currentEvd.round()}');
+      setState(() => _stage = MeasurementStage.idle);
+      widget.voice
+          .say('Test ${_testIndex + 1} complete, EVD ${_currentEvd.round()}');
       _testIndex++;
+      _liveSettlement.clear();
+      _liveVelocity.clear();
 
       if (_testIndex >= _testCount) {
-        // Compute average
-        _avgEvd = _testEvds.reduce((a, b) => a + b) / _testEvds.length;
+        _avgEvd =
+            _testDrops.map((d) => d.evd).reduce((a, b) => a + b) /
+                _testDrops.length;
         setState(() => _stage = MeasurementStage.complete);
         widget.voice.say(
             'Test finished. Average EVD ${_avgEvd.round()} megaNewton per square meter');
-        await _saveAllDrops();
+        await _saveGroup();
         await Future.delayed(const Duration(seconds: 2));
         if (mounted) Navigator.pop(context);
       } else {
@@ -185,7 +197,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
         if (mounted) _beginTest();
       }
     }
-
     _busy = false;
   }
 
@@ -194,6 +205,9 @@ class _MeasurementPageState extends State<MeasurementPage> {
     widget.voice.say('Preload ${_preloadIndex + 1}');
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
+    _liveSettlement.clear();
+    _liveVelocity.clear();
+    _collecting = true;
     setState(() => _stage = MeasurementStage.collectingPreload);
   }
 
@@ -202,11 +216,24 @@ class _MeasurementPageState extends State<MeasurementPage> {
     widget.voice.say('Test ${_testIndex + 1}');
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
+    _liveSettlement.clear();
+    _liveVelocity.clear();
+    _collecting = true;
     setState(() => _stage = MeasurementStage.collectingTest);
   }
 
-  Future<void> _saveAllDrops() async {
-    _location.drops.addAll(_pendingDrops);
+  Future<void> _saveGroup() async {
+    final pos = widget.gpsRecordingEnabled ? widget.gps.current : null;
+    final group = TestGroup(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      time: DateTime.now(),
+      drops: List.from(_testDrops),
+      plateRadius: widget.dropSettings.plateRadius,
+      latitude: pos?.latitude ?? 0,
+      longitude: pos?.longitude ?? 0,
+      accuracy: pos?.accuracy ?? 0,
+    );
+    _location.testGroups.add(group);
     await widget.onComplete();
   }
 
@@ -222,19 +249,12 @@ class _MeasurementPageState extends State<MeasurementPage> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Status header
             _header(),
             const SizedBox(height: 12),
-
-            // Magic eye + instruction
             _instructionCard(),
             const SizedBox(height: 12),
-
-            // Live reading
             _liveCard(),
             const SizedBox(height: 12),
-
-            // Progress / history
             Expanded(child: _progressCard()),
           ],
         ),
@@ -255,22 +275,18 @@ class _MeasurementPageState extends State<MeasurementPage> {
           Expanded(
             child: Text(
               '${widget.site.name} / ${widget.job.name} / ${_location.name}',
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 11),
+              style: const TextStyle(color: Colors.white, fontSize: 11),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Text(
-            'Plate: ${(_dropSettings.plateRadius * 200).toStringAsFixed(0)} mm',
-            style: TextStyle(
-                color: Colors.grey.shade500, fontSize: 10),
+            'Plate: ${widget.dropSettings.plateDiameterMm.toStringAsFixed(0)} mm',
+            style: TextStyle(color: Colors.grey.shade500, fontSize: 10),
           ),
         ],
       ),
     );
   }
-
-  DropSettings get _dropSettings => widget.dropSettings;
 
   Widget _instructionCard() {
     final (text, color, voice) = _instruction();
@@ -278,18 +294,15 @@ class _MeasurementPageState extends State<MeasurementPage> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [color.withOpacity(0.2), color.withOpacity(0.05)],
+          colors: [color.withValues(alpha: 0.2), color.withValues(alpha: 0.05)],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.5), width: 1.5),
+        border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
       ),
       child: Row(
         children: [
           MagicEye(
-            state: _stage == MeasurementStage.collectingPreload ||
-                    _stage == MeasurementStage.collectingTest
-                ? MagicEyeState.green
-                : MagicEyeState.blue,
+            state: _collecting ? MagicEyeState.green : MagicEyeState.blue,
             size: 60,
           ),
           const SizedBox(width: 16),
@@ -329,11 +342,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
           'PRELOAD ${_preloadIndex + 1}'
         );
       case MeasurementStage.collectingPreload:
-        return (
-          'Drop the weight now...',
-          Colors.greenAccent,
-          'RECORDING...'
-        );
+        return ('Drop the weight now...', Colors.greenAccent, 'RECORDING...');
       case MeasurementStage.readyTest:
         return (
           'Lift the drop weight. Release to perform Test ${_testIndex + 1} of $_testCount.',
@@ -341,11 +350,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
           'TEST ${_testIndex + 1}'
         );
       case MeasurementStage.collectingTest:
-        return (
-          'Drop the weight now...',
-          Colors.greenAccent,
-          'RECORDING...'
-        );
+        return ('Drop the weight now...', Colors.greenAccent, 'RECORDING...');
       case MeasurementStage.complete:
         return (
           'Test complete. Average EVD: ${_avgEvd.toStringAsFixed(1)} MN/m²',
@@ -356,7 +361,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
   }
 
   Widget _liveCard() {
-    final passed = _currentEvd >= _dropSettings.targetEvd;
+    final passed = _currentEvd >= widget.dropSettings.targetEvd;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -364,8 +369,9 @@ class _MeasurementPageState extends State<MeasurementPage> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: _hasCurrentReading
-              ? (passed ? Colors.green.withOpacity(0.5)
-                        : Colors.orange.withOpacity(0.5))
+              ? (passed
+                  ? Colors.green.withValues(alpha: 0.5)
+                  : Colors.orange.withValues(alpha: 0.5))
               : const Color(0xFF2A3654),
         ),
       ),
@@ -456,26 +462,23 @@ class _MeasurementPageState extends State<MeasurementPage> {
                   letterSpacing: 1.5,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
-          // Preloads row
           _progressRow('Preloads', _preloadIndex, _preloadCount,
               Colors.orangeAccent),
           const SizedBox(height: 8),
-          // Tests row
-          _progressRow('Tests', _testIndex, _testCount, const Color(0xFF00E5FF)),
-
-          if (_testEvds.isNotEmpty) ...[
+          _progressRow(
+              'Tests', _testIndex, _testCount, const Color(0xFF00E5FF)),
+          if (_testDrops.isNotEmpty) ...[
             const SizedBox(height: 12),
             const Divider(color: Color(0xFF2A3654)),
             const SizedBox(height: 8),
             Text(
-              'Test EVDs: ${_testEvds.map((e) => e.toStringAsFixed(1)).join(" | ")}',
+              'Test EVDs: ${_testDrops.map((e) => e.evd.toStringAsFixed(1)).join(" | ")}',
               style: TextStyle(
                   color: Colors.grey.shade400,
                   fontSize: 11,
                   fontFamily: 'monospace'),
             ),
           ],
-
           if (_stage == MeasurementStage.complete) ...[
             const SizedBox(height: 12),
             Container(
@@ -483,8 +486,8 @@ class _MeasurementPageState extends State<MeasurementPage> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    Colors.green.shade900.withOpacity(0.4),
-                    Colors.green.shade900.withOpacity(0.1),
+                    Colors.green.shade900.withValues(alpha: 0.4),
+                    Colors.green.shade900.withValues(alpha: 0.1),
                   ],
                 ),
                 borderRadius: BorderRadius.circular(10),
@@ -496,7 +499,8 @@ class _MeasurementPageState extends State<MeasurementPage> {
                   const Icon(Icons.check_circle,
                       color: Colors.greenAccent, size: 20),
                   const SizedBox(width: 8),
-                  Text('AVERAGE EVD: ${_avgEvd.toStringAsFixed(2)} MN/m²',
+                  Text(
+                      'AVERAGE EVD: ${_avgEvd.toStringAsFixed(2)} MN/m²',
                       style: const TextStyle(
                           color: Colors.greenAccent,
                           fontSize: 13,
@@ -538,15 +542,8 @@ class _MeasurementPageState extends State<MeasurementPage> {
                 height: 8,
                 margin: EdgeInsets.only(right: i < total - 1 ? 6 : 0),
                 decoration: BoxDecoration(
-                  color:
-                      filled ? color : Colors.grey.shade900,
+                  color: filled ? color : Colors.grey.shade900,
                   borderRadius: BorderRadius.circular(4),
-                  boxShadow: filled
-                      ? [
-                          BoxShadow(
-                              color: color.withOpacity(0.4), blurRadius: 6),
-                        ]
-                      : null,
                 ),
               ),
             );

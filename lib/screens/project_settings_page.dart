@@ -199,10 +199,12 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => DropListPage(
-                        location: _activeLocation!,
-                        profile: widget.profile,
-                        onChanged: (updated) async {
+                      builder: (_) =>  DropListPage(
+  location: _activeLocation!,
+  profile: widget.profile,
+  siteName: _activeSite?.name ?? '',
+  jobName: _activeJob?.name ?? '',
+  onChanged: (updated) async {
                           setState(() {
                             final si = _sites.indexWhere(
                                 (s) => s.id == _activeSiteId);

@@ -25,7 +25,31 @@ dependencies:
   printing: ^5.13.1
   image_picker: ^1.1.2
 
+ 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.0
+
+# App Icon configuration
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/logo.png"
+  adaptive_icon_background: "#0A0E1A"
+  adaptive_icon_foreground: "assets/icon/logo.png"
+
+# Splash screen configuration
+flutter_native_splash:
+  color: "#0A0E1A"
+  image: assets/icon/logo.png
+  android: true
+  ios: false
+  android_12:
+    image: assets/icon/logo.png
+    color: "#0A0E1A"
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0

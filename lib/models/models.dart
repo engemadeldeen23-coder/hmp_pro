@@ -1,7 +1,5 @@
-import 'package:flutter/material.dart';
-
 // ============================================================
-//  USER PROFILE
+//  MODELS
 // ============================================================
 class UserProfile {
   String companyName;
@@ -56,84 +54,136 @@ class UserProfile {
 }
 
 // ============================================================
-//  DROP (single measurement)
+//  DROP (single test drop - no preload stored)
 // ============================================================
 class Drop {
   final String id;
   final DateTime time;
   final int dropNumber;
-  final bool isPreload;
-  final double evd;          // MN/m²
-  final double deflection;    // mm
-  final double acceleration;  // g
-  final double velocity;      // m/s
-  final double latitude;
-  final double longitude;
-  final double accuracy;
-  final String? photoPath;
-  final double plateRadius;   // m (per drop - can be edited)
+  final double evd;
+  final double deflection;
+  final double acceleration;
+  final double velocity;
   final List<double> settlementCurve;
-  final List<double> impactCurve;
+  final List<double> velocityCurve;
 
   Drop({
     required this.id,
     required this.time,
     required this.dropNumber,
-    required this.isPreload,
     required this.evd,
     required this.deflection,
     required this.acceleration,
     required this.velocity,
-    required this.latitude,
-    required this.longitude,
-    required this.accuracy,
-    this.photoPath,
-    required this.plateRadius,
     this.settlementCurve = const [],
-    this.impactCurve = const [],
+    this.velocityCurve = const [],
   });
 
-  bool get hasLocation => latitude != 0 || longitude != 0;
+  /// Settlement / Velocity ratio (s/v) in mm / (m/s)
+  double get sOverV => velocity.abs() > 0.0001 ? deflection / velocity : 0;
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'time': time.toIso8601String(),
         'dropNumber': dropNumber,
-        'isPreload': isPreload,
         'evd': evd,
         'deflection': deflection,
         'acceleration': acceleration,
         'velocity': velocity,
-        'latitude': latitude,
-        'longitude': longitude,
-        'accuracy': accuracy,
-        'photoPath': photoPath,
-        'plateRadius': plateRadius,
         'settlementCurve': settlementCurve,
-        'impactCurve': impactCurve,
+        'velocityCurve': velocityCurve,
       };
 
   factory Drop.fromJson(Map<String, dynamic> j) => Drop(
         id: j['id'],
         time: DateTime.parse(j['time']),
         dropNumber: j['dropNumber'] ?? 0,
-        isPreload: j['isPreload'] ?? false,
         evd: (j['evd'] ?? 0).toDouble(),
         deflection: (j['deflection'] ?? 0).toDouble(),
         acceleration: (j['acceleration'] ?? 0).toDouble(),
         velocity: (j['velocity'] ?? 0).toDouble(),
-        latitude: (j['latitude'] ?? 0).toDouble(),
-        longitude: (j['longitude'] ?? 0).toDouble(),
-        accuracy: (j['accuracy'] ?? 0).toDouble(),
-        photoPath: j['photoPath'],
-        plateRadius: (j['plateRadius'] ?? 0.15).toDouble(),
         settlementCurve: List<double>.from(j['settlementCurve'] ?? []),
-        impactCurve: List<double>.from(j['impactCurve'] ?? []),
+        velocityCurve: List<double>.from(j['velocityCurve'] ?? []),
       );
 }
 
 // ============================================================
-//  LOCATION
+//  TEST GROUP (exactly 3 test drops)
+// ============================================================
+class TestGroup {
+  final String id;
+  final DateTime time;
+  final List<Drop> drops;      // exactly 3 drops
+  final double plateRadius;    // m
+  final double latitude;
+  final double longitude;
+  final double accuracy;
+  String? reportNote;
+
+  TestGroup({
+    required this.id,
+    required this.time,
+    required this.drops,
+    required this.plateRadius,
+    this.latitude = 0,
+    this.longitude = 0,
+    this.accuracy = 0,
+    this.reportNote,
+  });
+
+  bool get hasLocation => latitude != 0 || longitude != 0;
+  bool get isComplete => drops.length >= 3;
+  double get plateDiameterMm => plateRadius * 2000;
+
+  // Averages
+  double get avgEvd => drops.isEmpty
+      ? 0
+      : drops.map((d) => d.evd).reduce((a, b) => a + b) / drops.length;
+
+  double get avgDeflection => drops.isEmpty
+      ? 0
+      : drops.map((d) => d.deflection).reduce((a, b) => a + b) / drops.length;
+
+  double get avgAcceleration => drops.isEmpty
+      ? 0
+      : drops.map((d) => d.acceleration).reduce((a, b) => a + b) /
+          drops.length;
+
+  double get avgVelocity => drops.isEmpty
+      ? 0
+      : drops.map((d) => d.velocity).reduce((a, b) => a + b) / drops.length;
+
+  double get avgSOverV => drops.isEmpty
+      ? 0
+      : drops.map((d) => d.sOverV).reduce((a, b) => a + b) / drops.length;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'time': time.toIso8601String(),
+        'drops': drops.map((d) => d.toJson()).toList(),
+        'plateRadius': plateRadius,
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy': accuracy,
+        'reportNote': reportNote,
+      };
+
+  factory TestGroup.fromJson(Map<String, dynamic> j) => TestGroup(
+        id: j['id'],
+        time: DateTime.parse(j['time']),
+        drops: (j['drops'] as List? ?? [])
+            .map((x) => Drop.fromJson(x as Map<String, dynamic>))
+            .toList(),
+        plateRadius: (j['plateRadius'] ?? 0.15).toDouble(),
+        latitude: (j['latitude'] ?? 0).toDouble(),
+        longitude: (j['longitude'] ?? 0).toDouble(),
+        accuracy: (j['accuracy'] ?? 0).toDouble(),
+        reportNote: j['reportNote'],
+      );
+}
+
+// ============================================================
+//  LOCATION (contains test groups)
 // ============================================================
 class Location {
   String id;
@@ -141,7 +191,7 @@ class Location {
   double latitude;
   double longitude;
   String? photoPath;
-  List<Drop> drops;
+  List<TestGroup> testGroups;
 
   Location({
     required this.id,
@@ -149,15 +199,17 @@ class Location {
     this.latitude = 0,
     this.longitude = 0,
     this.photoPath,
-    List<Drop>? drops,
-  }) : drops = drops ?? [];
+    List<TestGroup>? testGroups,
+  }) : testGroups = testGroups ?? [];
 
-  int get testCount => drops.where((d) => !d.isPreload).length;
+  int get totalTests =>
+      testGroups.fold(0, (sum, g) => sum + g.drops.length);
 
   double get avgEvd {
-    final tests = drops.where((d) => !d.isPreload).toList();
-    if (tests.isEmpty) return 0;
-    return tests.map((d) => d.evd).reduce((a, b) => a + b) / tests.length;
+    if (testGroups.isEmpty) return 0;
+    final all = testGroups.expand((g) => g.drops).toList();
+    if (all.isEmpty) return 0;
+    return all.map((d) => d.evd).reduce((a, b) => a + b) / all.length;
   }
 
   Map<String, dynamic> toJson() => {
@@ -166,7 +218,7 @@ class Location {
         'latitude': latitude,
         'longitude': longitude,
         'photoPath': photoPath,
-        'drops': drops.map((d) => d.toJson()).toList(),
+        'testGroups': testGroups.map((g) => g.toJson()).toList(),
       };
 
   factory Location.fromJson(Map<String, dynamic> j) => Location(
@@ -175,8 +227,8 @@ class Location {
         latitude: (j['latitude'] ?? 0).toDouble(),
         longitude: (j['longitude'] ?? 0).toDouble(),
         photoPath: j['photoPath'],
-        drops: (j['drops'] as List? ?? [])
-            .map((x) => Drop.fromJson(x as Map<String, dynamic>))
+        testGroups: (j['testGroups'] as List? ?? [])
+            .map((x) => TestGroup.fromJson(x as Map<String, dynamic>))
             .toList(),
       );
 }
@@ -189,11 +241,8 @@ class Job {
   String name;
   List<Location> locations;
 
-  Job({
-    required this.id,
-    required this.name,
-    List<Location>? locations,
-  }) : locations = locations ?? [];
+  Job({required this.id, required this.name, List<Location>? locations})
+      : locations = locations ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -218,11 +267,8 @@ class Site {
   String name;
   List<Job> jobs;
 
-  Site({
-    required this.id,
-    required this.name,
-    List<Job>? jobs,
-  }) : jobs = jobs ?? [];
+  Site({required this.id, required this.name, List<Job>? jobs})
+      : jobs = jobs ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -240,14 +286,14 @@ class Site {
 }
 
 // ============================================================
-//  DROP SETTINGS (device settings)
+//  DROP SETTINGS
 // ============================================================
 class DropSettings {
-  double plateRadius;      // m
-  double poissonRatio;     // default 0.5
-  double distributionFactor; // default 2.0
-  double geophoneDistance; // mm (0 = no external)
-  double targetEvd;        // MN/m² (pass/fail)
+  double plateRadius;
+  double poissonRatio;
+  double distributionFactor;
+  double geophoneDistance;
+  double targetEvd;
 
   DropSettings({
     this.plateRadius = 0.15,
@@ -257,7 +303,7 @@ class DropSettings {
     this.targetEvd = 40.0,
   });
 
-  double get plateDiameterCm => plateRadius * 2 * 100;
+  double get plateDiameterMm => plateRadius * 2000;
 
   Map<String, dynamic> toJson() => {
         'plateRadius': plateRadius,

@@ -26,7 +26,7 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
   double _calFactor = 1.0;
   String _calDate = 'Never';
 
-  final List<double> _plateOptions = [0.05, 0.075, 0.10, 0.15, 0.20, 0.30];
+  final List<double> _plateOptions = [0.05, 0.075, 0.10, 0.15];
 
   @override
   void initState() {
