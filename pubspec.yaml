@@ -1,5 +1,5 @@
 name: hmp_pro
-description: HMP PRO - Industrial Light Weight Deflectometer
+description: HMP PRO - Industrial LWD
 publish_to: 'none'
 version: 3.0.0+1
 
@@ -10,74 +10,10 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # BLE
-  flutter_blue_plus: ^1.35.5
-
-  # Charts
-  fl_chart: ^0.68.0
-
-  # Data
-  csv: ^5.1.1
-  intl: ^0.19.0
-  shared_preferences: ^2.3.2
-  path_provider: ^2.1.4
-
-  # Permissions
-  permission_handler: ^11.3.1
-
-  # GPS
-  geolocator: ^12.0.0
-
-  # Sharing / export
-  share_plus: ^10.0.2
-  pdf: ^3.11.1
-  printing: ^5.13.1
-
-  # Voice
-  flutter_tts: ^4.0.2
-
-  # Weather (info bar)
-  http: ^1.2.2
-
-  # Battery indicator
-  battery_plus: ^6.0.1
-
-  # Location photos
-  image_picker: ^1.1.2
-
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
 
-  # Icon & splash generators
-  flutter_launcher_icons: ^0.13.1
-  flutter_native_splash: ^2.4.0
-
 flutter:
   uses-material-design: true
-
-  assets:
-    - assets/icon/
-
-# ============================================================
-#  APP LAUNCHER ICON
-# ============================================================
-flutter_launcher_icons:
-  android: true
-  ios: false
-  image_path: "assets/icon/logo.png"
-  adaptive_icon_background: "#0A0E1A"
-  adaptive_icon_foreground: "assets/icon/logo.png"
-
-# ============================================================
-#  SPLASH SCREEN
-# ============================================================
-flutter_native_splash:
-  color: "#0A0E1A"
-  image: assets/icon/logo.png
-  android: true
-  ios: false
-  android_12:
-    image: assets/icon/logo.png
-    color: "#0A0E1A"
