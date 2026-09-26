@@ -9,31 +9,60 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # BLE
   flutter_blue_plus: ^1.35.5
+
+  # Charts
   fl_chart: ^0.68.0
+
+  # Data
   csv: ^5.1.1
-  permission_handler: ^11.3.1
   intl: ^0.19.0
-  geolocator: ^12.0.0
   shared_preferences: ^2.3.2
-  share_plus: ^10.0.2
   path_provider: ^2.1.4
-  flutter_tts: ^4.0.2
-  http: ^1.2.2
-  battery_plus: ^6.0.1
+
+  # Permissions
+  permission_handler: ^11.3.1
+
+  # GPS
+  geolocator: ^12.0.0
+
+  # Sharing / export
+  share_plus: ^10.0.2
   pdf: ^3.11.1
   printing: ^5.13.1
+
+  # Voice
+  flutter_tts: ^4.0.2
+
+  # Weather (info bar)
+  http: ^1.2.2
+
+  # Battery indicator
+  battery_plus: ^6.0.1
+
+  # Location photos
   image_picker: ^1.1.2
 
- 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+
+  # Icon & splash generators
   flutter_launcher_icons: ^0.13.1
   flutter_native_splash: ^2.4.0
 
-# App Icon configuration
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icon/
+
+# ============================================================
+#  APP LAUNCHER ICON
+# ============================================================
 flutter_launcher_icons:
   android: true
   ios: false
@@ -41,7 +70,9 @@ flutter_launcher_icons:
   adaptive_icon_background: "#0A0E1A"
   adaptive_icon_foreground: "assets/icon/logo.png"
 
-# Splash screen configuration
+# ============================================================
+#  SPLASH SCREEN
+# ============================================================
 flutter_native_splash:
   color: "#0A0E1A"
   image: assets/icon/logo.png
@@ -50,9 +81,3 @@ flutter_native_splash:
   android_12:
     image: assets/icon/logo.png
     color: "#0A0E1A"
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^4.0.0
-
-flutter:
-  uses-material-design: true
