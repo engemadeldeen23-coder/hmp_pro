@@ -26,6 +26,7 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
   double _calFactor = 1.0;
   String _calDate = 'Never';
 
+  // Radius in meters -> corresponds to 100, 150, 200, 300 mm plates
   final List<double> _plateOptions = [0.05, 0.075, 0.10, 0.15];
 
   @override
@@ -57,10 +58,7 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
       geophoneDistance: double.tryParse(_geo.text) ?? 0,
       targetEvd: double.tryParse(_target.text) ?? 40.0,
     );
-    final c = Calibration(
-      factor: _calFactor,
-      date: _calDate,
-    );
+    final c = Calibration(factor: _calFactor, date: _calDate);
     await widget.onSave(s, c);
     if (mounted) Navigator.pop(context);
   }
@@ -85,8 +83,8 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           ElevatedButton(
-              onPressed: () => Navigator.pop(
-                  ctx, c.text == widget.password),
+              onPressed: () =>
+                  Navigator.pop(ctx, c.text == widget.password),
               child: const Text('Unlock')),
         ],
       ),
@@ -127,8 +125,8 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
               if (v != null && v > 0) {
                 setState(() {
                   _calFactor = v;
-                  _calDate =
-                      DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now());
+                  _calDate = DateFormat('yyyy-MM-dd HH:mm')
+                      .format(DateTime.now());
                 });
                 Navigator.pop(ctx);
               }
@@ -165,6 +163,8 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
               runSpacing: 8,
               children: _plateOptions.map((r) {
                 final selected = (r - _plateRadius).abs() < 0.001;
+                // FIXED: r * 2000 = diameter in mm (r is radius in meters)
+                final diameterMm = (r * 2000).toStringAsFixed(0);
                 return GestureDetector(
                   onTap: () => setState(() => _plateRadius = r),
                   child: Container(
@@ -183,11 +183,12 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
                       ),
                     ),
                     child: Text(
-                      '${(r * 200).toStringAsFixed(0)} mm',
+                      '$diameterMm mm',
                       style: TextStyle(
-                        color: selected ? Colors.white : Colors.grey.shade400,
+                        color:
+                            selected ? Colors.white : Colors.grey.shade400,
                         fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                        fontSize: 13,
                       ),
                     ),
                   ),
@@ -232,8 +233,8 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
                   ),
                   const SizedBox(height: 6),
                   Text('Last: $_calDate',
-                      style: const TextStyle(
-                          color: Colors.grey, fontSize: 10)),
+                      style:
+                          const TextStyle(color: Colors.grey, fontSize: 10)),
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
                     onPressed: _showCalDialog,
@@ -271,7 +272,8 @@ class _DropSettingsPageState extends State<DropSettingsPage> {
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: c,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        keyboardType:
+            const TextInputType.numberWithOptions(decimal: true),
         style: const TextStyle(color: Colors.white),
         decoration: InputDecoration(
           labelText: label,

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -64,34 +63,33 @@ class _MeasurementPageState extends State<MeasurementPage> {
   int _preloadIndex = 0;
   int _testIndex = 0;
 
-  // Live values
   double _currentEvd = 0;
   double _currentDef = 0;
   double _currentAcc = 0;
   double _currentVel = 0;
   bool _hasCurrentReading = false;
 
-  // Curves (live, cleared on each new drop)
+  // Live curves
   final List<double> _liveSettlement = [];
   final List<double> _liveVelocity = [];
   bool _collecting = false;
 
-  // Collected TEST drops only (preloads discarded)
+  // Collected test drops only
   final List<Drop> _testDrops = [];
   double _avgEvd = 0;
 
   StreamSubscription? _dataSub;
   bool _busy = false;
 
-  // Curve capture helper
-  DateTime? _curveStart;
-
   @override
   void initState() {
     super.initState();
     _location = widget.location;
     _dataSub = widget.ble.dataStream.listen(_onData);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _beginPreload());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.voice.say('Ready for preload 1');
+      _beginPreload();
+    });
   }
 
   @override
@@ -118,7 +116,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
       _hasCurrentReading = true;
     });
 
-    // Capture curves during collection window
+    // Capture live curve while collecting
     if (_collecting) {
       _liveSettlement.add(def);
       _liveVelocity.add(vel);
@@ -141,7 +139,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
     _busy = true;
     _collecting = false;
 
-    // Only keep test drops (drop preloads per requirements)
+    // Only keep test drops
     if (!isPreload) {
       final drop = Drop(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -176,16 +174,15 @@ class _MeasurementPageState extends State<MeasurementPage> {
       }
     } else {
       setState(() => _stage = MeasurementStage.idle);
-      widget.voice
-          .say('Test ${_testIndex + 1} complete, EVD ${_currentEvd.round()}');
+      widget.voice.say(
+          'Test ${_testIndex + 1} complete, EVD ${_currentEvd.round()}');
       _testIndex++;
       _liveSettlement.clear();
       _liveVelocity.clear();
 
       if (_testIndex >= _testCount) {
-        _avgEvd =
-            _testDrops.map((d) => d.evd).reduce((a, b) => a + b) /
-                _testDrops.length;
+        _avgEvd = _testDrops.map((d) => d.evd).reduce((a, b) => a + b) /
+            _testDrops.length;
         setState(() => _stage = MeasurementStage.complete);
         widget.voice.say(
             'Test finished. Average EVD ${_avgEvd.round()} megaNewton per square meter');
@@ -246,16 +243,16 @@ class _MeasurementPageState extends State<MeasurementPage> {
         backgroundColor: const Color(0xFF0A0E1A),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           children: [
             _header(),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _instructionCard(),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _liveCard(),
-            const SizedBox(height: 12),
-            Expanded(child: _progressCard()),
+            const SizedBox(height: 10),
+            Expanded(child: _progressAndChartCard()),
           ],
         ),
       ),
@@ -264,7 +261,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
 
   Widget _header() {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: const Color(0xFF151B2E),
         borderRadius: BorderRadius.circular(12),
@@ -291,21 +288,21 @@ class _MeasurementPageState extends State<MeasurementPage> {
   Widget _instructionCard() {
     final (text, color, voice) = _instruction();
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [color.withValues(alpha: 0.2), color.withValues(alpha: 0.05)],
+          colors: [color.withOpacity(0.2), color.withOpacity(0.05)],
         ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withOpacity(0.5), width: 1.5),
       ),
       child: Row(
         children: [
           MagicEye(
             state: _collecting ? MagicEyeState.green : MagicEyeState.blue,
-            size: 60,
+            size: 50,
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -313,14 +310,14 @@ class _MeasurementPageState extends State<MeasurementPage> {
                 Text(voice,
                     style: TextStyle(
                         color: color,
-                        fontSize: 11,
+                        fontSize: 10,
                         letterSpacing: 1.5,
                         fontWeight: FontWeight.w700)),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(text,
                     style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w600,
                         height: 1.3)),
               ],
@@ -337,7 +334,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
         return ('Please wait...', Colors.grey, 'WAIT');
       case MeasurementStage.readyPreload:
         return (
-          'Lift the drop weight. Release to perform Preload ${_preloadIndex + 1} of $_preloadCount.',
+          'Lift weight, release for Preload ${_preloadIndex + 1} of $_preloadCount.',
           Colors.orangeAccent,
           'PRELOAD ${_preloadIndex + 1}'
         );
@@ -345,7 +342,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
         return ('Drop the weight now...', Colors.greenAccent, 'RECORDING...');
       case MeasurementStage.readyTest:
         return (
-          'Lift the drop weight. Release to perform Test ${_testIndex + 1} of $_testCount.',
+          'Lift weight, release for Test ${_testIndex + 1} of $_testCount.',
           const Color(0xFF00E5FF),
           'TEST ${_testIndex + 1}'
         );
@@ -353,7 +350,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
         return ('Drop the weight now...', Colors.greenAccent, 'RECORDING...');
       case MeasurementStage.complete:
         return (
-          'Test complete. Average EVD: ${_avgEvd.toStringAsFixed(1)} MN/m²',
+          'Test complete. Avg EVD: ${_avgEvd.toStringAsFixed(1)} MN/m²',
           Colors.greenAccent,
           'TEST FINISHED'
         );
@@ -363,39 +360,29 @@ class _MeasurementPageState extends State<MeasurementPage> {
   Widget _liveCard() {
     final passed = _currentEvd >= widget.dropSettings.targetEvd;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF151B2E),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: _hasCurrentReading
               ? (passed
-                  ? Colors.green.withValues(alpha: 0.5)
-                  : Colors.orange.withValues(alpha: 0.5))
+                  ? Colors.green.withOpacity(0.5)
+                  : Colors.orange.withOpacity(0.5))
               : const Color(0xFF2A3654),
         ),
       ),
-      child: Column(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _metric('EVD', _currentEvd.toStringAsFixed(1), 'MN/m²',
-                  const Color(0xFF00E5FF), 38),
-              _metric('DEFL', _currentDef.toStringAsFixed(3), 'mm',
-                  Colors.orangeAccent, 22),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _smallMetric('Acc', '${_currentAcc.toStringAsFixed(3)} g',
-                  Colors.purpleAccent),
-              _smallMetric('Vel', '${_currentVel.toStringAsFixed(3)} m/s',
-                  Colors.greenAccent),
-            ],
-          ),
+          _metric('EVD', _currentEvd.toStringAsFixed(1), 'MN/m²',
+              const Color(0xFF00E5FF), 28),
+          _metric('DEFL', _currentDef.toStringAsFixed(3), 'mm',
+              Colors.orangeAccent, 18),
+          _metric('VEL', _currentVel.toStringAsFixed(3), 'm/s',
+              Colors.greenAccent, 14),
+          _metric('ACC', _currentAcc.toStringAsFixed(2), 'g',
+              Colors.purpleAccent, 14),
         ],
       ),
     );
@@ -408,107 +395,159 @@ class _MeasurementPageState extends State<MeasurementPage> {
         Text(l,
             style: TextStyle(
                 color: Colors.grey.shade500,
-                fontSize: 10,
-                letterSpacing: 1.5)),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(v,
-                style: TextStyle(
-                    color: c,
-                    fontSize: s,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace')),
-            const SizedBox(width: 4),
-            Text(u,
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _smallMetric(String l, String v, Color c) {
-    return Row(
-      children: [
-        Text('$l: ',
-            style: TextStyle(color: Colors.grey.shade500, fontSize: 10)),
+                fontSize: 9,
+                letterSpacing: 1)),
         Text(v,
             style: TextStyle(
                 color: c,
-                fontSize: 11,
+                fontSize: s,
                 fontWeight: FontWeight.bold,
                 fontFamily: 'monospace')),
+        Text(u,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 8)),
       ],
     );
   }
 
-  Widget _progressCard() {
+  // ============================================================
+  //  PROGRESS + LIVE SETTLEMENT CHART
+  // ============================================================
+  Widget _progressAndChartCard() {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF151B2E),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFF2A3654)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('SESSION PROGRESS',
-              style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 10,
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 10),
+          // Preloads row
           _progressRow('Preloads', _preloadIndex, _preloadCount,
               Colors.orangeAccent),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+
+          // Tests row
           _progressRow(
               'Tests', _testIndex, _testCount, const Color(0xFF00E5FF)),
-          if (_testDrops.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Divider(color: Color(0xFF2A3654)),
-            const SizedBox(height: 8),
-            Text(
-              'Test EVDs: ${_testDrops.map((e) => e.evd.toStringAsFixed(1)).join(" | ")}',
-              style: TextStyle(
-                  color: Colors.grey.shade400,
-                  fontSize: 11,
-                  fontFamily: 'monospace'),
-            ),
-          ],
-          if (_stage == MeasurementStage.complete) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.green.shade900.withValues(alpha: 0.4),
-                    Colors.green.shade900.withValues(alpha: 0.1),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.greenAccent),
+
+          const SizedBox(height: 8),
+          const Divider(color: Color(0xFF2A3654), height: 1),
+          const SizedBox(height: 6),
+
+          // Live settlement curve header
+          Row(
+            children: [
+              const Icon(Icons.show_chart,
+                  color: Color(0xFF00E5FF), size: 14),
+              const SizedBox(width: 6),
+              const Text('LIVE SETTLEMENT CURVE',
+                  style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 10,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.w600)),
+              const Spacer(),
+              if (_liveSettlement.isNotEmpty)
+                Text('${_liveSettlement.length} pts',
+                    style: TextStyle(
+                        color: Colors.grey.shade600, fontSize: 9)),
+            ],
+          ),
+          const SizedBox(height: 6),
+
+          // Live settlement chart
+          Expanded(child: _buildLiveChart()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLiveChart() {
+    // If no data yet, show placeholder
+    if (_liveSettlement.isEmpty) {
+      return Center(
+        child: Text(
+          _collecting ? 'Waiting for drop...' : 'Ready for next drop',
+          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+        ),
+      );
+    }
+
+    // Compute Y range
+    double maxY = 0.01;
+    double minY = 0;
+    for (final v in _liveSettlement) {
+      if (v > maxY) maxY = v;
+      if (v < minY) minY = v;
+    }
+    final pad = (maxY - minY) * 0.15;
+    maxY += pad;
+    minY -= pad;
+
+    final spots = <FlSpot>[];
+    for (int i = 0; i < _liveSettlement.length; i++) {
+      spots.add(FlSpot(i.toDouble(), _liveSettlement[i]));
+    }
+
+    return LineChart(
+      LineChartData(
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: ((maxY - minY) / 4).clamp(0.005, 100),
+          getDrawingHorizontalLine: (_) => FlLine(
+            color: Colors.grey.shade900,
+            strokeWidth: 1,
+          ),
+        ),
+        titlesData: FlTitlesData(
+          show: true,
+          topTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 40,
+              interval: ((maxY - minY) / 4).clamp(0.005, 100),
+              getTitlesWidget: (v, _) => Text(
+                v.toStringAsFixed(2),
+                style:
+                    TextStyle(color: Colors.grey.shade600, fontSize: 9),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.check_circle,
-                      color: Colors.greenAccent, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                      'AVERAGE EVD: ${_avgEvd.toStringAsFixed(2)} MN/m²',
-                      style: const TextStyle(
-                          color: Colors.greenAccent,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        minX: 0,
+        maxX: (_liveSettlement.length - 1).toDouble().clamp(10, 500),
+        minY: minY,
+        maxY: maxY,
+        lineBarsData: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            curveSmoothness: 0.25,
+            color: const Color(0xFF00E5FF),
+            barWidth: 2,
+            dotData: const FlDotData(show: false),
+            belowBarData: BarAreaData(
+              show: true,
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF00E5FF).withOpacity(0.35),
+                  const Color(0xFF00E5FF).withOpacity(0.0),
                 ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -533,17 +572,17 @@ class _MeasurementPageState extends State<MeasurementPage> {
                     fontWeight: FontWeight.bold)),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         Row(
           children: List.generate(total, (i) {
             final filled = i < current;
             return Expanded(
               child: Container(
-                height: 8,
+                height: 6,
                 margin: EdgeInsets.only(right: i < total - 1 ? 6 : 0),
                 decoration: BoxDecoration(
                   color: filled ? color : Colors.grey.shade900,
-                  borderRadius: BorderRadius.circular(4),
+                  borderRadius: BorderRadius.circular(3),
                 ),
               ),
             );
