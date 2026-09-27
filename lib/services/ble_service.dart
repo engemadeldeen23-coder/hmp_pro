@@ -11,7 +11,6 @@ class BleService {
       "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
   static const String characteristicUuid =
       "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-  static const String deviceName = "LWD-PROBE";
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _rx;
@@ -42,9 +41,7 @@ class BleService {
         return false;
       }
 
-      try {
-        await FlutterBluePlus.stopScan();
-      } catch (_) {}
+      try { await FlutterBluePlus.stopScan(); } catch (_) {}
       await Future.delayed(const Duration(milliseconds: 500));
 
       BluetoothDevice? found;
@@ -61,15 +58,12 @@ class BleService {
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
       await Future.delayed(const Duration(seconds: 11));
       await sub.cancel();
-      try {
-        await FlutterBluePlus.stopScan();
-      } catch (_) {}
+      try { await FlutterBluePlus.stopScan(); } catch (_) {}
 
       if (found == null) {
         _statusCtrl.add("Not found");
         return false;
       }
-
       return await _connect(found!);
     } catch (e) {
       _statusCtrl.add("Scan error: $e");
@@ -84,13 +78,7 @@ class BleService {
         await device.connect(timeout: const Duration(seconds: 15));
         await Future.delayed(const Duration(milliseconds: 700));
 
-        // Request larger MTU for curve data
-        try {
-          await device.requestMtu(512);
-          print('MTU requested: 512');
-        } catch (e) {
-          print('MTU request failed: $e');
-        }
+        try { await device.requestMtu(512); } catch (_) {}
 
         final services = await device.discoverServices();
         BluetoothCharacteristic? target;
@@ -110,9 +98,16 @@ class BleService {
           if (v.isEmpty) return;
           try {
             final t = utf8.decode(v, allowMalformed: true);
-            _handleData(t);
-          } catch (_) {}
-        }, onError: (e) => print("BLE stream error: $e"));
+            print('BLE RX: $t');
+            final trimmed = t.trim();
+            if (!trimmed.startsWith("{")) return;
+            final m = jsonDecode(trimmed) as Map<String, dynamic>;
+            _lastHeartbeat = DateTime.now();
+            _dataCtrl.add(m);
+          } catch (e) {
+            print('Parse error: $e');
+          }
+        }, onError: (e) => print("BLE error: $e"));
 
         _stateSub = device.connectionState.listen((state) {
           if (state == BluetoothConnectionState.disconnected) {
@@ -127,10 +122,9 @@ class BleService {
         _statusCtrl.add("Online");
         return true;
       } catch (e) {
+        print('Connect attempt $attempt failed: $e');
         if (attempt < 3) {
-          try {
-            await device.disconnect();
-          } catch (_) {}
+          try { await device.disconnect(); } catch (_) {}
           await Future.delayed(const Duration(seconds: 2));
         }
       }
@@ -139,18 +133,6 @@ class BleService {
     _connCtrl.add(false);
     _statusCtrl.add("Failed");
     return false;
-  }
-
-  void _handleData(String raw) {
-    try {
-      final t = raw.trim();
-      if (!t.startsWith("{")) return;
-      final m = jsonDecode(t) as Map<String, dynamic>;
-      _lastHeartbeat = DateTime.now();
-      _dataCtrl.add(m);
-    } catch (e) {
-      print("Parse error: $e");
-    }
   }
 
   Future<void> disconnect() async {
