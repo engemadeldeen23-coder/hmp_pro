@@ -2,9 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
-// ============================================================
-//  BLE SERVICE (Singleton) - wraps the ESP32 communication
-// ============================================================
 class BleService {
   static final BleService _instance = BleService._();
   factory BleService() => _instance;
@@ -37,7 +34,6 @@ class BleService {
       _lastHeartbeat != null &&
       DateTime.now().difference(_lastHeartbeat!).inSeconds < 15;
 
-  // ------- Scan & Connect -------
   Future<bool> scanAndConnect() async {
     try {
       _statusCtrl.add("Scanning...");
@@ -87,6 +83,14 @@ class BleService {
       try {
         await device.connect(timeout: const Duration(seconds: 15));
         await Future.delayed(const Duration(milliseconds: 700));
+
+        // Request larger MTU for curve data
+        try {
+          await device.requestMtu(512);
+          print('MTU requested: 512');
+        } catch (e) {
+          print('MTU request failed: $e');
+        }
 
         final services = await device.discoverServices();
         BluetoothCharacteristic? target;

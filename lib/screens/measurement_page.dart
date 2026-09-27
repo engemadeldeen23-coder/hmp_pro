@@ -128,17 +128,17 @@ class _MeasurementPageState extends State<MeasurementPage> {
     if (_busy) return;
     _busy = true;
 
-    // Parse curve data from ESP32
+       // Parse curve data from ESP32 (new field names: ct=curve time, cd=curve deflection)
     List<double> curveT = [];
     List<double> curveD = [];
     try {
-      if (m['curve_t'] != null) {
-        curveT = (m['curve_t'] as List)
+      if (m['ct'] != null) {
+        curveT = (m['ct'] as List)
             .map((v) => (v as num).toDouble())
             .toList();
       }
-      if (m['curve_d'] != null) {
-        curveD = (m['curve_d'] as List)
+      if (m['cd'] != null) {
+        curveD = (m['cd'] as List)
             .map((v) => (v as num).toDouble())
             .toList();
       }
