@@ -128,9 +128,10 @@ class _MeasurementPageState extends State<MeasurementPage> {
     if (_busy) return;
     _busy = true;
 
-       // Parse curve data from ESP32 (new field names: ct=curve time, cd=curve deflection)
+            // Parse curve data: ct=time, cd=deflection, cv=velocity
     List<double> curveT = [];
     List<double> curveD = [];
+    List<double> curveV = [];
     try {
       if (m['ct'] != null) {
         curveT = (m['ct'] as List)
@@ -139,6 +140,11 @@ class _MeasurementPageState extends State<MeasurementPage> {
       }
       if (m['cd'] != null) {
         curveD = (m['cd'] as List)
+            .map((v) => (v as num).toDouble())
+            .toList();
+      }
+      if (m['cv'] != null) {
+        curveV = (m['cv'] as List)
             .map((v) => (v as num).toDouble())
             .toList();
       }
@@ -160,7 +166,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
         acceleration: _currentAcc,
         velocity: _currentVel,
         settlementCurve: curveD,
-        velocityCurve: const [],
+        velocityCurve: curveV,
         impactTimeCurve: curveT,
       );
       _testDrops.add(drop);
