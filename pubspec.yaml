@@ -1,7 +1,7 @@
 name: hmp_pro
 description: HMP PRO - Industrial Light Weight Deflectometer
 publish_to: 'none'
-version: 3.0.0+1
+version: 3.1.0+1
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
   flutter_blue_plus: ^1.35.5
   fl_chart: ^0.68.0
   csv: ^5.1.1

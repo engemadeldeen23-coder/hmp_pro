@@ -53,9 +53,6 @@ class UserProfile {
       );
 }
 
-// ============================================================
-//  DROP (single test drop - no preload stored)
-// ============================================================
 class Drop {
   final String id;
   final DateTime time;
@@ -64,8 +61,9 @@ class Drop {
   final double deflection;
   final double acceleration;
   final double velocity;
-  final List<double> settlementCurve;
-  final List<double> velocityCurve;
+  final List<double> settlementCurve;   // mm
+  final List<double> velocityCurve;     // m/s
+  final List<double> impactTimeCurve;   // ms
 
   Drop({
     required this.id,
@@ -77,9 +75,9 @@ class Drop {
     required this.velocity,
     this.settlementCurve = const [],
     this.velocityCurve = const [],
+    this.impactTimeCurve = const [],
   });
 
-  /// Settlement / Velocity ratio (s/v) in mm / (m/s)
   double get sOverV => velocity.abs() > 0.0001 ? deflection / velocity : 0;
 
   Map<String, dynamic> toJson() => {
@@ -92,6 +90,7 @@ class Drop {
         'velocity': velocity,
         'settlementCurve': settlementCurve,
         'velocityCurve': velocityCurve,
+        'impactTimeCurve': impactTimeCurve,
       };
 
   factory Drop.fromJson(Map<String, dynamic> j) => Drop(
@@ -104,17 +103,15 @@ class Drop {
         velocity: (j['velocity'] ?? 0).toDouble(),
         settlementCurve: List<double>.from(j['settlementCurve'] ?? []),
         velocityCurve: List<double>.from(j['velocityCurve'] ?? []),
+        impactTimeCurve: List<double>.from(j['impactTimeCurve'] ?? []),
       );
 }
 
-// ============================================================
-//  TEST GROUP (exactly 3 test drops)
-// ============================================================
 class TestGroup {
   final String id;
   final DateTime time;
-  final List<Drop> drops;      // exactly 3 drops
-  final double plateRadius;    // m
+  final List<Drop> drops;
+  final double plateRadius;
   final double latitude;
   final double longitude;
   final double accuracy;
@@ -135,7 +132,6 @@ class TestGroup {
   bool get isComplete => drops.length >= 3;
   double get plateDiameterMm => plateRadius * 2000;
 
-  // Averages
   double get avgEvd => drops.isEmpty
       ? 0
       : drops.map((d) => d.evd).reduce((a, b) => a + b) / drops.length;
@@ -146,8 +142,7 @@ class TestGroup {
 
   double get avgAcceleration => drops.isEmpty
       ? 0
-      : drops.map((d) => d.acceleration).reduce((a, b) => a + b) /
-          drops.length;
+      : drops.map((d) => d.acceleration).reduce((a, b) => a + b) / drops.length;
 
   double get avgVelocity => drops.isEmpty
       ? 0
@@ -156,6 +151,11 @@ class TestGroup {
   double get avgSOverV => drops.isEmpty
       ? 0
       : drops.map((d) => d.sOverV).reduce((a, b) => a + b) / drops.length;
+
+  double get maxSOverV {
+    if (drops.isEmpty) return 0;
+    return drops.map((d) => d.sOverV).reduce((a, b) => a > b ? a : b);
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -182,9 +182,6 @@ class TestGroup {
       );
 }
 
-// ============================================================
-//  LOCATION (contains test groups)
-// ============================================================
 class Location {
   String id;
   String name;
@@ -233,9 +230,6 @@ class Location {
       );
 }
 
-// ============================================================
-//  JOB
-// ============================================================
 class Job {
   String id;
   String name;
@@ -259,9 +253,6 @@ class Job {
       );
 }
 
-// ============================================================
-//  SITE
-// ============================================================
 class Site {
   String id;
   String name;
@@ -285,9 +276,6 @@ class Site {
       );
 }
 
-// ============================================================
-//  DROP SETTINGS
-// ============================================================
 class DropSettings {
   double plateRadius;
   double poissonRatio;
@@ -322,9 +310,6 @@ class DropSettings {
       );
 }
 
-// ============================================================
-//  CALIBRATION
-// ============================================================
 class Calibration {
   double factor;
   String date;

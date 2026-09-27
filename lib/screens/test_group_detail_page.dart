@@ -92,28 +92,34 @@ class TestGroupDetailPage extends StatelessWidget {
   }
 
   Widget _buildHeader() {
+    final passed = group.avgEvd >= 40;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF151B2E), Color(0xFF1E2740)],
+        gradient: LinearGradient(
+          colors: passed
+              ? [const Color(0xFF0F2A1A), const Color(0xFF153A22)]
+              : [const Color(0xFF2A0F0F), const Color(0xFF3A1515)],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF2A3654)),
+        border: Border.all(
+            color: passed ? Colors.greenAccent : Colors.redAccent,
+            width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.folder_special,
-                  color: Color(0xFF00E5FF), size: 18),
+              Icon(passed ? Icons.verified : Icons.cancel,
+                  color: passed ? Colors.greenAccent : Colors.redAccent,
+                  size: 20),
               const SizedBox(width: 8),
-              const Text(
-                'TEST GROUP',
+              Text(
+                passed ? 'VALID TEST' : 'INVALID TEST',
                 style: TextStyle(
-                  color: Color(0xFF00E5FF),
-                  fontSize: 12,
+                  color: passed ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: 13,
                   letterSpacing: 1.5,
                   fontWeight: FontWeight.bold,
                 ),
@@ -162,44 +168,60 @@ class TestGroupDetailPage extends StatelessWidget {
 
   Widget _buildSettlementChart() {
     return _chartCard(
-      title: 'SETTLEMENT CURVES (3 DROPS OVERLAID)',
+      title: 'SETTLEMENT vs IMPACT TIME (3 DROPS)',
       unit: 'mm',
       curves: group.drops
           .asMap()
           .entries
-          .map((e) => (e.value.settlementCurve, _colorForIndex(e.key)))
+          .map((e) => (e.value, e.key))
           .toList(),
+      isSettlement: true,
     );
   }
 
   Widget _buildVelocityChart() {
     return _chartCard(
-      title: 'VELOCITY CURVES (3 DROPS OVERLAID)',
+      title: 'VELOCITY vs IMPACT TIME (3 DROPS)',
       unit: 'm/s',
       curves: group.drops
           .asMap()
           .entries
-          .map((e) => (e.value.velocityCurve, _colorForIndex(e.key)))
+          .map((e) => (e.value, e.key))
           .toList(),
+      isSettlement: false,
     );
   }
 
   Widget _chartCard({
     required String title,
     required String unit,
-    required List<(List<double>, Color)> curves,
+    required List<(Drop, int)> curves,
+    required bool isSettlement,
   }) {
     double maxY = 0.01;
     double minY = 0;
-    int maxX = 1;
-    for (final (data, _) in curves) {
+    double maxX = 1;
+    bool hasData = false;
+
+    for (final (d, _) in curves) {
+      final data =
+          isSettlement ? d.settlementCurve : d.velocityCurve;
       if (data.isEmpty) continue;
-      final localMax = data.reduce((a, b) => a > b ? a : b);
-      final localMin = data.reduce((a, b) => a < b ? a : b);
-      if (localMax > maxY) maxY = localMax;
-      if (localMin < minY) minY = localMin;
-      if (data.length > maxX) maxX = data.length;
+      hasData = true;
+      for (final v in data) {
+        if (v > maxY) maxY = v;
+        if (v < minY) minY = v;
+      }
+      // X range from impact time
+      if (d.impactTimeCurve.isNotEmpty) {
+        final tmax = d.impactTimeCurve
+            .reduce((a, b) => a > b ? a : b);
+        if (tmax > maxX) maxX = tmax;
+      } else if (data.length > maxX) {
+        maxX = data.length.toDouble();
+      }
     }
+
     final pad = (maxY - minY) * 0.15;
     maxY += pad;
     minY -= pad;
@@ -222,8 +244,8 @@ class TestGroupDetailPage extends StatelessWidget {
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           SizedBox(
-            height: 180,
-            child: curves.every((c) => c.$1.isEmpty)
+            height: 200,
+            child: !hasData
                 ? Center(
                     child: Text('No curve data',
                         style: TextStyle(
@@ -246,8 +268,20 @@ class TestGroupDetailPage extends StatelessWidget {
                             sideTitles: SideTitles(showTitles: false)),
                         rightTitles: const AxisTitles(
                             sideTitles: SideTitles(showTitles: false)),
-                        bottomTitles: const AxisTitles(
-                            sideTitles: SideTitles(showTitles: false)),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 24,
+                            interval:
+                                (maxX / 4).clamp(1, 1000).toDouble(),
+                            getTitlesWidget: (v, _) => Text(
+                              v.toStringAsFixed(0),
+                              style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 9),
+                            ),
+                          ),
+                        ),
                         leftTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
@@ -257,32 +291,47 @@ class TestGroupDetailPage extends StatelessWidget {
                             getTitlesWidget: (v, _) => Text(
                               v.toStringAsFixed(2),
                               style: TextStyle(
-                                  color: Colors.grey.shade600, fontSize: 9),
+                                  color: Colors.grey.shade600,
+                                  fontSize: 9),
                             ),
                           ),
                         ),
                       ),
                       borderData: FlBorderData(show: false),
                       minX: 0,
-                      maxX: maxX.toDouble(),
+                      maxX: maxX,
                       minY: minY,
                       maxY: maxY,
                       lineBarsData: curves
                           .asMap()
                           .entries
-                          .where((e) => e.value.$1.isNotEmpty)
+                          .where((e) =>
+                              (isSettlement
+                                      ? e.value.$1.settlementCurve
+                                      : e.value.$1.velocityCurve)
+                                  .isNotEmpty)
                           .map((e) {
-                        final (data, color) = e.value;
+                        final d = e.value.$1;
+                        final idx = e.value.$2;
+                        final data = isSettlement
+                            ? d.settlementCurve
+                            : d.velocityCurve;
+                        final timeData = d.impactTimeCurve;
+
+                        final spots = <FlSpot>[];
+                        for (int i = 0; i < data.length; i++) {
+                          final x = (timeData.length > i)
+                              ? timeData[i]
+                              : i.toDouble();
+                          spots.add(FlSpot(x, data[i]));
+                        }
+
                         return LineChartBarData(
-                          spots: data
-                              .asMap()
-                              .entries
-                              .map((x) => FlSpot(x.key.toDouble(), x.value))
-                              .toList(),
+                          spots: spots,
                           isCurved: true,
-                          curveSmoothness: 0.25,
-                          color: color,
-                          barWidth: 2,
+                          curveSmoothness: 0.2,
+                          color: _colorForIndex(idx),
+                          barWidth: 2.5,
                           dotData: const FlDotData(show: false),
                         );
                       }).toList(),
@@ -298,9 +347,9 @@ class TestGroupDetailPage extends StatelessWidget {
                 child: Row(
                   children: [
                     Container(
-                        width: 12, height: 3, color: _colorForIndex(i)),
+                        width: 14, height: 3, color: _colorForIndex(i)),
                     const SizedBox(width: 4),
-                    Text('Test ${i + 1}',
+                    Text('Drop ${i + 1}',
                         style: const TextStyle(
                             color: Colors.white70, fontSize: 10)),
                   ],
@@ -309,9 +358,9 @@ class TestGroupDetailPage extends StatelessWidget {
             }),
           ),
           Center(
-            child: Text(unit,
-                style:
-                    TextStyle(color: Colors.grey.shade600, fontSize: 9)),
+            child: Text('Impact time (ms)  /  $unit',
+                style: TextStyle(
+                    color: Colors.grey.shade600, fontSize: 9)),
           ),
         ],
       ),
@@ -336,38 +385,41 @@ class TestGroupDetailPage extends StatelessWidget {
                   letterSpacing: 1.5,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
-          Table(
-            border:
-                TableBorder.all(color: const Color(0xFF2A3654), width: 1),
-            columnWidths: const {
-              0: FlexColumnWidth(0.7),
-              1: FlexColumnWidth(1.2),
-              2: FlexColumnWidth(1.2),
-              3: FlexColumnWidth(1.2),
-              4: FlexColumnWidth(1.3),
-              5: FlexColumnWidth(1.3),
-            },
-            children: [
-              _tableHeader([
-                'Test',
-                'Settle (mm)',
-                'Velocity',
-                'EVD',
-                'Acc (g)',
-                'S/V',
-              ]),
-              ...group.drops.asMap().entries.map((e) {
-                final d = e.value;
-                return _tableRow([
-                  '${e.key + 1}',
-                  d.deflection.toStringAsFixed(3),
-                  d.velocity.toStringAsFixed(3),
-                  d.evd.toStringAsFixed(1),
-                  d.acceleration.toStringAsFixed(3),
-                  d.sOverV.toStringAsFixed(3),
-                ]);
-              }).toList(),
-            ],
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Table(
+              border: TableBorder.all(
+                  color: const Color(0xFF2A3654), width: 1),
+              columnWidths: const {
+                0: FixedColumnWidth(60),   // Test (WIDER)
+                1: FixedColumnWidth(85),
+                2: FixedColumnWidth(80),
+                3: FixedColumnWidth(80),
+                4: FixedColumnWidth(70),
+                5: FixedColumnWidth(85),
+              },
+              children: [
+                _tableHeader([
+                  'Test',
+                  'Settle (mm)',
+                  'Velocity',
+                  'EVD',
+                  'Acc (g)',
+                  'S/V',
+                ]),
+                ...group.drops.asMap().entries.map((e) {
+                  final d = e.value;
+                  return _tableRow([
+                    'Test ${e.key + 1}',
+                    d.deflection.toStringAsFixed(3),
+                    d.velocity.toStringAsFixed(3),
+                    d.evd.toStringAsFixed(1),
+                    d.acceleration.toStringAsFixed(3),
+                    d.sOverV.toStringAsFixed(3),
+                  ]);
+                }).toList(),
+              ],
+            ),
           ),
         ],
       ),
@@ -375,45 +427,59 @@ class TestGroupDetailPage extends StatelessWidget {
   }
 
   Widget _buildAverageTable() {
+    final passed = group.avgEvd >= 40;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Colors.green.shade900.withValues(alpha: 0.4),
-            Colors.green.shade900.withValues(alpha: 0.1),
-          ],
+          colors: passed
+              ? [
+                  Colors.green.shade900.withOpacity(0.4),
+                  Colors.green.shade900.withOpacity(0.1),
+                ]
+              : [
+                  Colors.red.shade900.withOpacity(0.4),
+                  Colors.red.shade900.withOpacity(0.1),
+                ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border:
-            Border.all(color: Colors.greenAccent.withValues(alpha: 0.5)),
+        border: Border.all(
+            color: passed ? Colors.greenAccent : Colors.redAccent),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.analytics, color: Colors.greenAccent, size: 16),
-              SizedBox(width: 8),
-              Text('GROUP AVERAGE',
+              Icon(passed ? Icons.analytics : Icons.warning,
+                  color: passed ? Colors.greenAccent : Colors.redAccent,
+                  size: 16),
+              const SizedBox(width: 8),
+              Text(passed ? 'VALID TEST' : 'INVALID TEST',
                   style: TextStyle(
-                      color: Colors.greenAccent,
+                      color: passed
+                          ? Colors.greenAccent
+                          : Colors.redAccent,
                       fontSize: 11,
                       letterSpacing: 1.5,
                       fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 12),
-          _avgRow(
-              'Settlement', '${group.avgDeflection.toStringAsFixed(3)} mm'),
-          _avgRow(
-              'Velocity', '${group.avgVelocity.toStringAsFixed(3)} m/s'),
-          _avgRow('Young\'s Modulus (EVD)',
-              '${group.avgEvd.toStringAsFixed(2)} MN/m²'),
-          _avgRow('Acceleration',
-              '${group.avgAcceleration.toStringAsFixed(3)} g'),
-          _avgRow('S/V Ratio',
-              '${group.avgSOverV.toStringAsFixed(3)} mm·s/m'),
+          _avgRow('EVD Mean (MN/m²)',
+              group.avgEvd.toStringAsFixed(2)),
+          _avgRow('Settlement Mean (mm)',
+              group.avgDeflection.toStringAsFixed(4)),
+          _avgRow('Deflection Mean (mm)',
+              group.avgDeflection.toStringAsFixed(4)),
+          _avgRow('Velocity Mean (m/s)',
+              group.avgVelocity.toStringAsFixed(4)),
+          _avgRow('Acceleration Mean (g)',
+              group.avgAcceleration.toStringAsFixed(4)),
+          _avgRow('S/V Max (mm·s/m)',
+              group.maxSOverV.toStringAsFixed(4)),
+          _avgRow('S/V Mean (mm·s/m)',
+              group.avgSOverV.toStringAsFixed(4)),
         ],
       ),
     );
@@ -431,7 +497,7 @@ class TestGroupDetailPage extends StatelessWidget {
           ),
           Text(value,
               style: const TextStyle(
-                  color: Colors.greenAccent,
+                  color: Colors.white,
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
                   fontFamily: 'monospace')),

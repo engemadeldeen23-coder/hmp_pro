@@ -1,16 +1,8 @@
-import 'services/utils_extensions.dart';
 import 'dart:async';
-import 'dart:io';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:intl/intl.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:http/http.dart' as http;
 
@@ -19,16 +11,12 @@ import 'services/storage_service.dart';
 import 'services/ble_service.dart';
 import 'services/gps_service.dart';
 import 'services/voice_service.dart';
-import 'services/export_service.dart';
 import 'widgets/magic_eye.dart';
 import 'screens/user_profile_page.dart';
 import 'screens/project_settings_page.dart';
 import 'screens/drop_settings_page.dart';
 import 'screens/measurement_page.dart';
 
-// ============================================================
-//  MAIN
-// ============================================================
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -39,9 +27,6 @@ void main() {
   runApp(const HmpProApp());
 }
 
-// ============================================================
-//  APP
-// ============================================================
 class HmpProApp extends StatelessWidget {
   const HmpProApp({super.key});
   @override
@@ -69,7 +54,7 @@ class HmpProApp extends StatelessWidget {
 }
 
 // ============================================================
-//  SPLASH SCREEN (works on all devices - no plugin needed)
+//  SPLASH SCREEN
 // ============================================================
 class SplashScreen extends StatefulWidget {
   final Widget child;
@@ -200,17 +185,15 @@ class _HomePageState extends State<HomePage> {
   DateTime _now = DateTime.now();
   String _weather = '';
 
-  StreamSubscription? _bleDataSub;
   StreamSubscription? _bleConnSub;
   StreamSubscription? _gpsSub;
 
-  double _lastEvd = 0;
-  double _lastDef = 0;
-  double _lastAcc = 0;
-  double _lastVel = 0;
-
   Timer? _clockTimer;
   Timer? _batteryTimer;
+  Timer? _screenTimer;
+  bool _screenDimmed = false;
+  DateTime _lastInteraction = DateTime.now();
+
   String? _errorMessage;
   bool _initialized = false;
 
@@ -224,16 +207,36 @@ class _HomePageState extends State<HomePage> {
     _batteryTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _refreshBattery();
     });
+    // Screen timeout check every 5 seconds
+    _screenTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _checkScreenTimeout();
+    });
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
     _batteryTimer?.cancel();
-    _bleDataSub?.cancel();
+    _screenTimer?.cancel();
     _bleConnSub?.cancel();
     _gpsSub?.cancel();
     super.dispose();
+  }
+
+  void _checkScreenTimeout() {
+    if (!mounted) return;
+    final idle = DateTime.now().difference(_lastInteraction).inSeconds;
+    if (idle >= 180 && !_screenDimmed) {
+      // 3 minutes idle
+      setState(() => _screenDimmed = true);
+    }
+  }
+
+  void _onInteraction() {
+    _lastInteraction = DateTime.now();
+    if (_screenDimmed) {
+      setState(() => _screenDimmed = false);
+    }
   }
 
   Future<void> _init() async {
@@ -288,7 +291,6 @@ class _HomePageState extends State<HomePage> {
                 : MagicEyeState.red;
           });
         });
-        _bleDataSub = _ble.dataStream.listen(_onBleData);
       } catch (e) {
         print('BLE error: $e');
       }
@@ -332,18 +334,6 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
-  void _onBleData(Map<String, dynamic> m) {
-    if (!mounted) return;
-    final type = m['type'] as String?;
-    if (type == 'hb') return;
-    setState(() {
-      _lastEvd = (m['evd'] ?? 0).toDouble() * _calibration.factor;
-      _lastDef = (m['def'] ?? 0).toDouble();
-      _lastAcc = (m['acc'] ?? 0).toDouble();
-      _lastVel = (m['vel'] ?? 0).toDouble();
-    });
-  }
-
   Site? get _activeSite =>
       _sites.firstWhereOrNull((s) => s.id == _activeSiteId);
   Job? get _activeJob =>
@@ -351,20 +341,44 @@ class _HomePageState extends State<HomePage> {
   Location? get _activeLocation =>
       _activeJob?.locations.firstWhereOrNull((l) => l.id == _activeLocationId);
 
+  TestGroup? get _lastCompletedGroup {
+    final loc = _activeLocation;
+    if (loc == null || loc.testGroups.isEmpty) return null;
+    return loc.testGroups.last;
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Screen dimmed overlay
+    if (_screenDimmed) {
+      return GestureDetector(
+        onTap: _onInteraction,
+        onPanUpdate: (_) => _onInteraction(),
+        child: Container(
+          color: Colors.black,
+          child: const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.touch_app, color: Colors.white24, size: 60),
+                SizedBox(height: 16),
+                Text(
+                  'Touch to wake',
+                  style: TextStyle(color: Colors.white24, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_errorMessage != null) {
       return Scaffold(
         backgroundColor: const Color(0xFF0A0E1A),
         body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Text(
-              _errorMessage!,
-              style: const TextStyle(color: Colors.redAccent, fontSize: 14),
-              textAlign: TextAlign.center,
-            ),
-          ),
+          child: Text(_errorMessage!,
+              style: const TextStyle(color: Colors.redAccent)),
         ),
       );
     }
@@ -378,15 +392,20 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    return Scaffold(
-      drawer: _buildSettingsDrawer(),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildUpperZone(),
-            Expanded(child: _buildCentralZone()),
-            _buildLowerZone(),
-          ],
+    // Wrap everything with Listener for interaction tracking
+    return Listener(
+      onPointerDown: (_) => _onInteraction(),
+      onPointerMove: (_) => _onInteraction(),
+      child: Scaffold(
+        drawer: _buildSettingsDrawer(),
+        body: SafeArea(
+          child: Column(
+            children: [
+              _buildUpperZone(),
+              Expanded(child: _buildCentralZone()),
+              _buildLowerZone(),
+            ],
+          ),
         ),
       ),
     );
@@ -413,19 +432,15 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      DateFormat('EEEE, MMM d, yyyy').format(_now),
-                      style: TextStyle(
-                          color: Colors.grey.shade400, fontSize: 11),
-                    ),
-                    Text(
-                      DateFormat('HH:mm:ss').format(_now),
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace'),
-                    ),
+                    Text(DateFormat('EEEE, MMM d, yyyy').format(_now),
+                        style: TextStyle(
+                            color: Colors.grey.shade400, fontSize: 11)),
+                    Text(DateFormat('HH:mm:ss').format(_now),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace')),
                   ],
                 ),
               ),
@@ -444,14 +459,13 @@ class _HomePageState extends State<HomePage> {
                   child: Row(
                     children: [
                       Icon(
-                        _batteryCharging
-                            ? Icons.battery_charging_full
-                            : Icons.battery_full,
-                        color: _batteryLevel > 20
-                            ? Colors.greenAccent
-                            : Colors.redAccent,
-                        size: 14,
-                      ),
+                          _batteryCharging
+                              ? Icons.battery_charging_full
+                              : Icons.battery_full,
+                          color: _batteryLevel > 20
+                              ? Colors.greenAccent
+                              : Colors.redAccent,
+                          size: 14),
                       const SizedBox(width: 4),
                       Text('$_batteryLevel%',
                           style: const TextStyle(
@@ -474,25 +488,21 @@ class _HomePageState extends State<HomePage> {
             child: Row(
               children: [
                 Icon(
-                  _ble.isConnected
-                      ? Icons.bluetooth_connected
-                      : Icons.bluetooth_disabled,
-                  color: _ble.isConnected
-                      ? Colors.greenAccent
-                      : Colors.redAccent,
-                  size: 14,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _ble.isConnected ? 'Connected' : 'Disconnected',
-                  style: TextStyle(
-                    fontSize: 10,
+                    _ble.isConnected
+                        ? Icons.bluetooth_connected
+                        : Icons.bluetooth_disabled,
                     color: _ble.isConnected
                         ? Colors.greenAccent
                         : Colors.redAccent,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                    size: 14),
+                const SizedBox(width: 6),
+                Text(_ble.isConnected ? 'Connected' : 'Disconnected',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: _ble.isConnected
+                            ? Colors.greenAccent
+                            : Colors.redAccent,
+                        fontWeight: FontWeight.bold)),
                 const Spacer(),
                 if (_weather.isNotEmpty)
                   Text(_weather,
@@ -512,53 +522,45 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         children: [
           _buildProjectStatusCard(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
-                child: _actionButton(
-                  icon: Icons.business,
-                  label: 'Project\nSettings',
-                  color: const Color(0xFF1E88E5),
-                  onTap: _openProjectSettings,
-                ),
-              ),
+                  child: _actionButton(
+                      icon: Icons.business,
+                      label: 'Project\nSettings',
+                      color: const Color(0xFF1E88E5),
+                      onTap: _openProjectSettings)),
               const SizedBox(width: 8),
               Expanded(
-                child: _actionButton(
-                  icon: Icons.tune,
-                  label: 'Test\nSettings',
-                  color: Colors.amber.shade700,
-                  onTap: _openDropSettings,
-                ),
-              ),
+                  child: _actionButton(
+                      icon: Icons.tune,
+                      label: 'Test\nSettings',
+                      color: Colors.amber.shade700,
+                      onTap: _openDropSettings)),
               const SizedBox(width: 8),
               Expanded(
-                child: _actionButton(
-                  icon: Icons.location_on,
-                  label: 'GPS',
-                  color: Colors.purpleAccent.shade700,
-                  onTap: _showGpsInfo,
-                ),
-              ),
+                  child: _actionButton(
+                      icon: Icons.location_on,
+                      label: 'GPS',
+                      color: Colors.purpleAccent.shade700,
+                      onTap: _showGpsInfo)),
               const SizedBox(width: 8),
               Expanded(
-                child: _actionButton(
-                  icon: _gpsRecordingEnabled
-                      ? Icons.gps_fixed
-                      : Icons.gps_off,
-                  label: _gpsRecordingEnabled ? 'GPS ON' : 'GPS OFF',
-                  color: _gpsRecordingEnabled
-                      ? Colors.green.shade700
-                      : Colors.grey.shade700,
-                  onTap: _toggleGpsRecording,
-                ),
-              ),
+                  child: _actionButton(
+                      icon: _gpsRecordingEnabled
+                          ? Icons.gps_fixed
+                          : Icons.gps_off,
+                      label: _gpsRecordingEnabled ? 'GPS ON' : 'GPS OFF',
+                      color: _gpsRecordingEnabled
+                          ? Colors.green.shade700
+                          : Colors.grey.shade700,
+                      onTap: _toggleGpsRecording)),
             ],
           ),
-          const SizedBox(height: 16),
-          _buildLiveCard(),
           const SizedBox(height: 12),
+          _buildLastGroupMeansCard(),
+          const SizedBox(height: 10),
           _buildEyeCard(),
         ],
       ),
@@ -567,11 +569,11 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildProjectStatusCard() {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
             colors: [Color(0xFF151B2E), Color(0xFF1E2740)]),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFF2A3654)),
       ),
       child: Column(
@@ -583,11 +585,12 @@ class _HomePageState extends State<HomePage> {
                   fontSize: 10,
                   letterSpacing: 1.5,
                   fontWeight: FontWeight.w600)),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           _statusRow('Site', _activeSite?.name ?? 'None'),
           _statusRow('Job', _activeJob?.name ?? 'None'),
           _statusRow('Location', _activeLocation?.name ?? 'None'),
-          _statusRow('Groups',
+          _statusRow(
+              'Groups',
               _activeLocation == null
                   ? '—'
                   : '${_activeLocation!.testGroups.length}'),
@@ -598,14 +601,14 @@ class _HomePageState extends State<HomePage> {
 
   Widget _statusRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
           SizedBox(
             width: 80,
             child: Text(label,
-                style: TextStyle(
-                    color: Colors.grey.shade500, fontSize: 11)),
+                style:
+                    TextStyle(color: Colors.grey.shade500, fontSize: 11)),
           ),
           Expanded(
             child: Text(value,
@@ -628,17 +631,17 @@ class _HomePageState extends State<HomePage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         decoration: BoxDecoration(
           gradient: LinearGradient(
               colors: [color.withOpacity(0.25), color.withOpacity(0.1)]),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: color.withOpacity(0.6), width: 1.2),
         ),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 8),
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 6),
             Text(label,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
@@ -652,52 +655,122 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildLiveCard() {
-    final passed = _lastEvd >= _dropSettings.targetEvd;
+  // ============================================================
+  //  LAST GROUP MEANS CARD
+  // ============================================================
+  Widget _buildLastGroupMeansCard() {
+    final group = _lastCompletedGroup;
+
+    if (group == null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF151B2E),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF2A3654)),
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.analytics_outlined,
+                color: Colors.grey.shade700, size: 32),
+            const SizedBox(height: 8),
+            Text('No test completed yet',
+                style: TextStyle(
+                    color: Colors.grey.shade600, fontSize: 12)),
+            Text('Perform a 3-drop test to see results',
+                style: TextStyle(
+                    color: Colors.grey.shade700, fontSize: 10)),
+          ],
+        ),
+      );
+    }
+
+    final passed = group.avgEvd >= _dropSettings.targetEvd;
+
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-            colors: [Color(0xFF151B2E), Color(0xFF1E2740)]),
-        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: passed
+              ? [
+                  Colors.green.shade900.withOpacity(0.4),
+                  Colors.green.shade900.withOpacity(0.05),
+                ]
+              : [
+                  Colors.red.shade900.withOpacity(0.4),
+                  Colors.red.shade900.withOpacity(0.05),
+                ],
+        ),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: passed
-                ? Colors.green.withOpacity(0.4)
-                : const Color(0xFF2A3654)),
+            color: passed ? Colors.greenAccent : Colors.redAccent,
+            width: 1.5),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
-              Text('EVD',
+              Icon(passed ? Icons.verified : Icons.cancel,
+                  color: passed ? Colors.greenAccent : Colors.redAccent,
+                  size: 18),
+              const SizedBox(width: 6),
+              Text(
+                passed ? 'VALID TEST' : 'INVALID TEST',
+                style: TextStyle(
+                  color: passed ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: 12,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                  DateFormat('HH:mm:ss').format(group.time),
                   style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 10,
-                      letterSpacing: 1.5)),
-              Text(_lastEvd.toStringAsFixed(1),
-                  style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF00E5FF),
-                      fontFamily: 'monospace')),
+                      color: Colors.grey.shade400, fontSize: 10)),
             ],
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          const SizedBox(height: 12),
+          Row(
             children: [
-              Text('DEFL',
-                  style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 10,
-                      letterSpacing: 1.5)),
-              Text('${_lastDef.toStringAsFixed(3)} mm',
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.orangeAccent,
-                      fontFamily: 'monospace')),
+              Expanded(
+                child: _meanMetric(
+                  'EVD MEAN',
+                  group.avgEvd.toStringAsFixed(1),
+                  'MN/m²',
+                  const Color(0xFF00E5FF),
+                ),
+              ),
+              Expanded(
+                child: _meanMetric(
+                  'S MEAN',
+                  group.avgDeflection.toStringAsFixed(3),
+                  'mm',
+                  Colors.orangeAccent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _meanMetric(
+                  'DEFL MEAN',
+                  group.avgDeflection.toStringAsFixed(3),
+                  'mm',
+                  Colors.purpleAccent,
+                ),
+              ),
+              Expanded(
+                child: _meanMetric(
+                  'S/V MAX',
+                  group.maxSOverV.toStringAsFixed(3),
+                  'mm·s/m',
+                  Colors.greenAccent,
+                ),
+              ),
             ],
           ),
         ],
@@ -705,18 +778,48 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _meanMetric(String label, String value, String unit, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: TextStyle(
+                color: Colors.grey.shade500,
+                fontSize: 9,
+                letterSpacing: 1)),
+        const SizedBox(height: 3),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(value,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace')),
+            const SizedBox(width: 3),
+            Text(unit,
+                style: TextStyle(
+                    color: Colors.grey.shade600, fontSize: 9)),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _buildEyeCard() {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: const Color(0xFF151B2E),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFF2A3654)),
       ),
       child: Row(
         children: [
-          MagicEye(state: _eyeState, size: 60),
-          const SizedBox(width: 16),
+          MagicEye(state: _eyeState, size: 50),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -727,14 +830,12 @@ class _HomePageState extends State<HomePage> {
                         fontSize: 10,
                         letterSpacing: 1.5,
                         fontWeight: FontWeight.w600)),
-                const SizedBox(height: 6),
-                Text(
-                  _eyeStateText(),
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600),
-                ),
+                const SizedBox(height: 4),
+                Text(_eyeStateText(),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -773,11 +874,10 @@ class _HomePageState extends State<HomePage> {
                 child: ElevatedButton.icon(
                   onPressed: _ble.isConnected ? null : _connectDevice,
                   icon: Icon(
-                    _ble.isConnected
-                        ? Icons.bluetooth_connected
-                        : Icons.bluetooth,
-                    size: 18,
-                  ),
+                      _ble.isConnected
+                          ? Icons.bluetooth_connected
+                          : Icons.bluetooth,
+                      size: 18),
                   label:
                       Text(_ble.isConnected ? 'CONNECTED' : 'CONNECT'),
                   style: ElevatedButton.styleFrom(
@@ -785,26 +885,25 @@ class _HomePageState extends State<HomePage> {
                         ? Colors.green.shade800
                         : Colors.red.shade800,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
                 icon: Icon(
-                  _voiceEnabled ? Icons.volume_up : Icons.volume_off,
-                  color: _voiceEnabled
-                      ? const Color(0xFF00E5FF)
-                      : Colors.grey,
-                ),
+                    _voiceEnabled ? Icons.volume_up : Icons.volume_off,
+                    color: _voiceEnabled
+                        ? const Color(0xFF00E5FF)
+                        : Colors.grey),
                 onPressed: _toggleVoice,
                 style: IconButton.styleFrom(
                   backgroundColor: const Color(0xFF151B2E),
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(10),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(10)),
                 ),
               ),
             ],
@@ -817,15 +916,15 @@ class _HomePageState extends State<HomePage> {
               icon: const Icon(Icons.play_arrow, size: 22),
               label: const Text('START TEST',
                   style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF00E5FF),
                 foregroundColor: const Color(0xFF0A0E1A),
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ),
@@ -961,7 +1060,7 @@ class _HomePageState extends State<HomePage> {
       _snack('Please select a Location first');
       return;
     }
-    _voice.say('First preload');
+    _voice.say('Ready for preload 1');
     setState(() => _eyeState = MagicEyeState.green);
     await Navigator.push(
       context,
@@ -1063,9 +1162,8 @@ class _HomePageState extends State<HomePage> {
               ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close')),
         ],
       ),
     );
@@ -1090,9 +1188,8 @@ class _HomePageState extends State<HomePage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
-          ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close')),
         ],
       ),
     );
@@ -1104,5 +1201,14 @@ class _HomePageState extends State<HomePage> {
       SnackBar(
           content: Text(m), duration: const Duration(seconds: 2)),
     );
+  }
+}
+
+extension FirstWhereOrNull<E> on List<E> {
+  E? firstWhereOrNull(bool Function(E) test) {
+    for (final e in this) {
+      if (test(e)) return e;
+    }
+    return null;
   }
 }

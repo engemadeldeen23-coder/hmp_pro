@@ -14,12 +14,13 @@ class VoiceService {
     if (_initialized) return;
     try {
       await _tts.setLanguage("en-US");
-      await _tts.setSpeechRate(0.5);
+      // SLOWER SPEECH: 0.28 (default is ~0.5) for crystal-clear field guidance
+      await _tts.setSpeechRate(0.28);
       await _tts.setVolume(1.0);
       await _tts.setPitch(1.0);
       await _tts.awaitSpeakCompletion(true);
       _initialized = true;
-      print('Voice initialized');
+      print('Voice initialized - slow mode');
     } catch (e) {
       print('Voice init failed: $e');
     }
