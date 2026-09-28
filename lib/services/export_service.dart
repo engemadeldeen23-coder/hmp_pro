@@ -5,10 +5,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/models.dart';
+import 'units_service.dart';
 
 class ExportService {
   // ============================================================
-  //  SIMPLE CSV (list of drops)
+  //  SIMPLE CSV (drops)
   // ============================================================
   static Future<File> buildCsv(
     List<Drop> drops,
@@ -16,37 +17,31 @@ class ExportService {
     UserProfile? profile,
   }) async {
     final rows = <List<dynamic>>[];
-
     if (profile != null && profile.companyName.isNotEmpty) {
       rows.add([profile.companyName]);
-      if (profile.engineerName.isNotEmpty) {
-        rows.add(['Engineer: ${profile.engineerName}']);
-      }
       rows.add([]);
     }
-
     rows.add([title]);
     rows.add([]);
     rows.add([
       'Drop #',
       'Date',
       'Time',
-      'EVD (MN/m²)',
-      'Deflection (mm)',
+      'EVD (${UnitsService.evdUnit()})',
+      'Deflection (${UnitsService.deflectionUnit()})',
       'Acceleration (g)',
-      'Velocity (m/s)',
-      'S/V (mm·s/m)',
+      'Velocity (${UnitsService.velocityUnit()})',
+      'S/V',
     ]);
-
     for (final d in drops) {
       rows.add([
         d.dropNumber,
         DateFormat('yyyy-MM-dd').format(d.time),
         DateFormat('HH:mm:ss').format(d.time),
-        d.evd.toStringAsFixed(2),
-        d.deflection.toStringAsFixed(4),
+        UnitsService.evd(d.evd).toStringAsFixed(2),
+        UnitsService.deflection(d.deflection).toStringAsFixed(4),
         d.acceleration.toStringAsFixed(4),
-        d.velocity.toStringAsFixed(4),
+        UnitsService.velocity(d.velocity).toStringAsFixed(4),
         d.sOverV.toStringAsFixed(4),
       ]);
     }
@@ -60,7 +55,7 @@ class ExportService {
   }
 
   // ============================================================
-  //  GROUP CSV - includes full curve data
+  //  GROUP CSV - with curves
   // ============================================================
   static Future<File> buildGroupCsv(
     TestGroup group, {
@@ -73,9 +68,6 @@ class ExportService {
 
     if (profile != null && profile.companyName.isNotEmpty) {
       rows.add([profile.companyName]);
-      if (profile.engineerName.isNotEmpty) {
-        rows.add(['Engineer: ${profile.engineerName}']);
-      }
       rows.add([]);
     }
 
@@ -84,79 +76,70 @@ class ExportService {
     rows.add(['Site', siteName]);
     rows.add(['Job', jobName]);
     rows.add(['Location', locationName]);
-    rows.add([
-      'Date',
-      DateFormat('yyyy-MM-dd HH:mm:ss').format(group.time)
-    ]);
-    rows.add([
-      'Plate Diameter',
-      '${group.plateDiameterMm.toStringAsFixed(0)} mm'
-    ]);
+    rows.add(['Date', DateFormat('yyyy-MM-dd HH:mm:ss').format(group.time)]);
+    rows.add(['Plate Diameter', '${group.plateDiameterMm.toStringAsFixed(0)} mm']);
+    rows.add(['Unit System', UnitsService.system]);
     if (group.hasLocation) {
-      rows.add([
-        'GPS',
-        '${group.latitude.toStringAsFixed(6)}, ${group.longitude.toStringAsFixed(6)}'
-      ]);
+      rows.add(['GPS', '${group.latitude.toStringAsFixed(6)}, ${group.longitude.toStringAsFixed(6)}']);
     }
     rows.add([]);
 
-    // Summary table
+    // Test summary
     rows.add(['TEST DATA']);
     rows.add([
       'Test #',
       'Time',
-      'Settlement (mm)',
-      'Velocity (m/s)',
-      'EVD (MN/m²)',
+      'Settlement (${UnitsService.deflectionUnit()})',
+      'Velocity (${UnitsService.velocityUnit()})',
+      'EVD (${UnitsService.evdUnit()})',
       'Acceleration (g)',
-      'S/V (mm·s/m)',
+      'S/V',
     ]);
     for (final d in group.drops) {
       rows.add([
         d.dropNumber,
         DateFormat('HH:mm:ss').format(d.time),
-        d.deflection.toStringAsFixed(4),
-        d.velocity.toStringAsFixed(4),
-        d.evd.toStringAsFixed(2),
+        UnitsService.deflection(d.deflection).toStringAsFixed(4),
+        UnitsService.velocity(d.velocity).toStringAsFixed(4),
+        UnitsService.evd(d.evd).toStringAsFixed(2),
         d.acceleration.toStringAsFixed(4),
         d.sOverV.toStringAsFixed(4),
       ]);
     }
 
+    // Averages
     rows.add([]);
     rows.add(['GROUP AVERAGES']);
-    rows.add(['Avg Settlement (mm)', group.avgDeflection.toStringAsFixed(4)]);
-    rows.add(['Avg Velocity (m/s)', group.avgVelocity.toStringAsFixed(4)]);
-    rows.add(['Avg EVD (MN/m²)', group.avgEvd.toStringAsFixed(2)]);
+    rows.add(['Avg Settlement (${UnitsService.deflectionUnit()})',
+        UnitsService.deflection(group.avgDeflection).toStringAsFixed(4)]);
+    rows.add(['Avg Velocity (${UnitsService.velocityUnit()})',
+        UnitsService.velocity(group.avgVelocity).toStringAsFixed(4)]);
+    rows.add(['Avg EVD (${UnitsService.evdUnit()})',
+        UnitsService.evd(group.avgEvd).toStringAsFixed(2)]);
     rows.add(['Avg Acceleration (g)', group.avgAcceleration.toStringAsFixed(4)]);
-    rows.add(['S/V Max (mm·s/m)', group.maxSOverV.toStringAsFixed(4)]);
-    rows.add(['S/V Mean (mm·s/m)', group.avgSOverV.toStringAsFixed(4)]);
+    rows.add(['S/V Max', group.maxSOverV.toStringAsFixed(4)]);
+    rows.add(['S/V Mean', group.avgSOverV.toStringAsFixed(4)]);
 
     // ============================================================
-    //  CURVE DATA - Settlement vs Impact Time
+    //  SETTLEMENT CURVE TABLE
     // ============================================================
     rows.add([]);
     rows.add([]);
-    rows.add(['CURVE DATA - SETTLEMENT vs IMPACT TIME (mm)']);
+    rows.add(['CURVE DATA - SETTLEMENT vs IMPACT TIME (${UnitsService.deflectionUnit()})']);
     rows.add([]);
 
-    // Header row: Impact Time | Drop 1 | Drop 2 | Drop 3
-    final curveHeader = <dynamic>['Impact Time (ms)'];
+    final settleHeader = <dynamic>['Impact Time (ms)'];
     for (int i = 0; i < group.drops.length; i++) {
-      curveHeader.add('Drop ${i + 1} (mm)');
+      settleHeader.add('Drop ${i + 1}');
     }
-    rows.add(curveHeader);
+    rows.add(settleHeader);
 
-    // Find max curve length
-    int maxLen = 0;
+    int maxSettleLen = 0;
     for (final d in group.drops) {
-      if (d.settlementCurve.length > maxLen) maxLen = d.settlementCurve.length;
+      if (d.settlementCurve.length > maxSettleLen) maxSettleLen = d.settlementCurve.length;
     }
-
-    // Emit curve data row by row using impactTimeCurve
-    for (int i = 0; i < maxLen; i++) {
+    for (int i = 0; i < maxSettleLen; i++) {
       final row = <dynamic>[];
-      // Get time from first drop that has this index
       double timeMs = 0;
       for (final d in group.drops) {
         if (d.impactTimeCurve.length > i) {
@@ -167,7 +150,7 @@ class ExportService {
       row.add(timeMs.toStringAsFixed(0));
       for (final d in group.drops) {
         if (d.settlementCurve.length > i) {
-          row.add(d.settlementCurve[i].toStringAsFixed(4));
+          row.add(UnitsService.deflection(d.settlementCurve[i]).toStringAsFixed(4));
         } else {
           row.add('');
         }
@@ -176,16 +159,16 @@ class ExportService {
     }
 
     // ============================================================
-    //  CURVE DATA - Velocity vs Impact Time
+    //  VELOCITY CURVE TABLE
     // ============================================================
     rows.add([]);
     rows.add([]);
-    rows.add(['CURVE DATA - VELOCITY vs IMPACT TIME (m/s)']);
+    rows.add(['CURVE DATA - VELOCITY vs IMPACT TIME (${UnitsService.velocityUnit()})']);
     rows.add([]);
 
     final velHeader = <dynamic>['Impact Time (ms)'];
     for (int i = 0; i < group.drops.length; i++) {
-      velHeader.add('Drop ${i + 1} (m/s)');
+      velHeader.add('Drop ${i + 1}');
     }
     rows.add(velHeader);
 
@@ -193,7 +176,6 @@ class ExportService {
     for (final d in group.drops) {
       if (d.velocityCurve.length > maxVelLen) maxVelLen = d.velocityCurve.length;
     }
-
     for (int i = 0; i < maxVelLen; i++) {
       final row = <dynamic>[];
       double timeMs = 0;
@@ -206,7 +188,7 @@ class ExportService {
       row.add(timeMs.toStringAsFixed(0));
       for (final d in group.drops) {
         if (d.velocityCurve.length > i) {
-          row.add(d.velocityCurve[i].toStringAsFixed(4));
+          row.add(UnitsService.velocity(d.velocityCurve[i]).toStringAsFixed(4));
         } else {
           row.add('');
         }
@@ -253,10 +235,10 @@ class ExportService {
                 .map((d) => [
                       d.dropNumber.toString(),
                       DateFormat('HH:mm:ss').format(d.time),
-                      d.evd.toStringAsFixed(1),
-                      d.deflection.toStringAsFixed(3),
+                      UnitsService.evd(d.evd).toStringAsFixed(1),
+                      UnitsService.deflection(d.deflection).toStringAsFixed(3),
                       d.acceleration.toStringAsFixed(3),
-                      d.velocity.toStringAsFixed(3),
+                      UnitsService.velocity(d.velocity).toStringAsFixed(3),
                       d.sOverV.toStringAsFixed(3),
                     ])
                 .toList(),
@@ -276,7 +258,7 @@ class ExportService {
   }
 
   // ============================================================
-  //  GROUP PDF - with curve data tables + charts
+  //  GROUP PDF (with curves drawn as line charts)
   // ============================================================
   static Future<File> buildGroupPdf(
     TestGroup group, {
@@ -287,60 +269,6 @@ class ExportService {
   }) async {
     final pdf = pw.Document();
 
-    // Precompute curve data for PDF tables
-    int maxSettleLen = 0;
-    for (final d in group.drops) {
-      if (d.settlementCurve.length > maxSettleLen) {
-        maxSettleLen = d.settlementCurve.length;
-      }
-    }
-    int maxVelLen = 0;
-    for (final d in group.drops) {
-      if (d.velocityCurve.length > maxVelLen) {
-        maxVelLen = d.velocityCurve.length;
-      }
-    }
-
-    // Settlement curve table data
-    final settleTableData = <List<String>>[];
-    for (int i = 0; i < maxSettleLen; i++) {
-      final row = <String>[];
-      double timeMs = 0;
-      for (final d in group.drops) {
-        if (d.impactTimeCurve.length > i) {
-          timeMs = d.impactTimeCurve[i];
-          break;
-        }
-      }
-      row.add(timeMs.toStringAsFixed(0));
-      for (final d in group.drops) {
-        row.add(d.settlementCurve.length > i
-            ? d.settlementCurve[i].toStringAsFixed(4)
-            : '');
-      }
-      settleTableData.add(row);
-    }
-
-    // Velocity curve table data
-    final velTableData = <List<String>>[];
-    for (int i = 0; i < maxVelLen; i++) {
-      final row = <String>[];
-      double timeMs = 0;
-      for (final d in group.drops) {
-        if (d.impactTimeCurve.length > i) {
-          timeMs = d.impactTimeCurve[i];
-          break;
-        }
-      }
-      row.add(timeMs.toStringAsFixed(0));
-      for (final d in group.drops) {
-        row.add(d.velocityCurve.length > i
-            ? d.velocityCurve[i].toStringAsFixed(4)
-            : '');
-      }
-      velTableData.add(row);
-    }
-
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -348,7 +276,7 @@ class ExportService {
         build: (context) {
           final w = <pw.Widget>[];
 
-          // ---- Header ----
+          // Header
           if (profile != null && profile.companyName.isNotEmpty) {
             w.add(pw.Text(profile.companyName,
                 style: pw.TextStyle(
@@ -365,7 +293,7 @@ class ExportService {
                   fontSize: 13, fontWeight: pw.FontWeight.bold)));
           w.add(pw.SizedBox(height: 10));
 
-          // ---- Project Info ----
+          // Info
           w.add(pw.Text('Site: $siteName',
               style: const pw.TextStyle(fontSize: 10)));
           w.add(pw.Text('Job: $jobName',
@@ -378,6 +306,8 @@ class ExportService {
           w.add(pw.Text(
               'Plate Diameter: ${group.plateDiameterMm.toStringAsFixed(0)} mm',
               style: const pw.TextStyle(fontSize: 10)));
+          w.add(pw.Text('Unit System: ${UnitsService.system}',
+              style: const pw.TextStyle(fontSize: 10)));
           if (group.hasLocation) {
             w.add(pw.Text(
                 'GPS: ${group.latitude.toStringAsFixed(6)}, ${group.longitude.toStringAsFixed(6)}',
@@ -385,7 +315,7 @@ class ExportService {
           }
           w.add(pw.SizedBox(height: 14));
 
-          // ---- Test Data Table ----
+          // Test data table
           w.add(pw.Text('TEST DATA',
               style: pw.TextStyle(
                   fontSize: 11, fontWeight: pw.FontWeight.bold)));
@@ -393,18 +323,20 @@ class ExportService {
           w.add(pw.Table.fromTextArray(
             headers: [
               'Test',
-              'Settle (mm)',
-              'Velocity (m/s)',
-              'EVD (MN/m²)',
+              'Settle (${UnitsService.deflectionUnit()})',
+              'Velocity (${UnitsService.velocityUnit()})',
+              'EVD (${UnitsService.evdUnit()})',
               'Acc (g)',
-              'S/V (mm·s/m)',
+              'S/V',
             ],
             data: group.drops
                 .map((d) => [
                       'Test ${d.dropNumber}',
-                      d.deflection.toStringAsFixed(4),
-                      d.velocity.toStringAsFixed(4),
-                      d.evd.toStringAsFixed(2),
+                      UnitsService.deflection(d.deflection)
+                          .toStringAsFixed(4),
+                      UnitsService.velocity(d.velocity)
+                          .toStringAsFixed(4),
+                      UnitsService.evd(d.evd).toStringAsFixed(2),
                       d.acceleration.toStringAsFixed(4),
                       d.sOverV.toStringAsFixed(4),
                     ])
@@ -419,7 +351,7 @@ class ExportService {
 
           w.add(pw.SizedBox(height: 14));
 
-          // ---- Averages ----
+          // Averages
           w.add(pw.Text('GROUP AVERAGES',
               style: pw.TextStyle(
                   fontSize: 11, fontWeight: pw.FontWeight.bold)));
@@ -427,15 +359,25 @@ class ExportService {
           w.add(pw.Table.fromTextArray(
             headers: ['Metric', 'Value'],
             data: [
-              ['Settlement Mean (mm)',
-                  group.avgDeflection.toStringAsFixed(4)],
-              ['Velocity Mean (m/s)',
-                  group.avgVelocity.toStringAsFixed(4)],
-              ['EVD Mean (MN/m²)', group.avgEvd.toStringAsFixed(2)],
-              ['Acceleration Mean (g)',
-                  group.avgAcceleration.toStringAsFixed(4)],
-              ['S/V Max (mm·s/m)', group.maxSOverV.toStringAsFixed(4)],
-              ['S/V Mean (mm·s/m)', group.avgSOverV.toStringAsFixed(4)],
+              [
+                'Settlement Mean (${UnitsService.deflectionUnit()})',
+                UnitsService.deflection(group.avgDeflection)
+                    .toStringAsFixed(4)
+              ],
+              [
+                'Velocity Mean (${UnitsService.velocityUnit()})',
+                UnitsService.velocity(group.avgVelocity).toStringAsFixed(4)
+              ],
+              [
+                'EVD Mean (${UnitsService.evdUnit()})',
+                UnitsService.evd(group.avgEvd).toStringAsFixed(2)
+              ],
+              [
+                'Acceleration Mean (g)',
+                group.avgAcceleration.toStringAsFixed(4)
+              ],
+              ['S/V Max', group.maxSOverV.toStringAsFixed(4)],
+              ['S/V Mean', group.avgSOverV.toStringAsFixed(4)],
             ],
             headerStyle: pw.TextStyle(
                 fontWeight: pw.FontWeight.bold, fontSize: 10),
@@ -445,75 +387,134 @@ class ExportService {
             cellAlignment: pw.Alignment.centerLeft,
           ));
 
+          // ============================================================
+          //  CHARTS DRAWN AS LINE PLOTS
+          // ============================================================
+          w.add(pw.SizedBox(height: 20));
+          w.add(pw.Text('SETTLEMENT vs IMPACT TIME (INVERTED)',
+              style: pw.TextStyle(
+                  fontSize: 11, fontWeight: pw.FontWeight.bold)));
+          w.add(pw.SizedBox(height: 6));
+          w.add(_buildPdfCurveChart(
+            drops: group.drops,
+            isSettlement: true,
+            unit: UnitsService.deflectionUnit(),
+          ));
+
+          w.add(pw.SizedBox(height: 16));
+          w.add(pw.Text('VELOCITY vs IMPACT TIME',
+              style: pw.TextStyle(
+                  fontSize: 11, fontWeight: pw.FontWeight.bold)));
+          w.add(pw.SizedBox(height: 6));
+          w.add(_buildPdfCurveChart(
+            drops: group.drops,
+            isSettlement: false,
+            unit: UnitsService.velocityUnit(),
+          ));
+
           return w;
         },
       ),
     );
-
-    // ---- Second page: Settlement curve data ----
-    if (settleTableData.isNotEmpty) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(28),
-          build: (context) => [
-            pw.Text('SETTLEMENT vs IMPACT TIME (mm)',
-                style: pw.TextStyle(
-                    fontSize: 12, fontWeight: pw.FontWeight.bold)),
-            pw.SizedBox(height: 10),
-            pw.Table.fromTextArray(
-              headers: [
-                'Time (ms)',
-                for (int i = 0; i < group.drops.length; i++)
-                  'Drop ${i + 1} (mm)',
-              ],
-              data: settleTableData,
-              headerStyle: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold, fontSize: 9),
-              cellStyle: const pw.TextStyle(fontSize: 8),
-              headerDecoration:
-                  const pw.BoxDecoration(color: PdfColors.blue100),
-              cellAlignment: pw.Alignment.center,
-            ),
-          ],
-        ),
-      );
-    }
-
-    // ---- Third page: Velocity curve data ----
-    if (velTableData.isNotEmpty) {
-      pdf.addPage(
-        pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(28),
-          build: (context) => [
-            pw.Text('VELOCITY vs IMPACT TIME (m/s)',
-                style: pw.TextStyle(
-                    fontSize: 12, fontWeight: pw.FontWeight.bold)),
-            pw.SizedBox(height: 10),
-            pw.Table.fromTextArray(
-              headers: [
-                'Time (ms)',
-                for (int i = 0; i < group.drops.length; i++)
-                  'Drop ${i + 1} (m/s)',
-              ],
-              data: velTableData,
-              headerStyle: pw.TextStyle(
-                  fontWeight: pw.FontWeight.bold, fontSize: 9),
-              cellStyle: const pw.TextStyle(fontSize: 8),
-              headerDecoration:
-                  const pw.BoxDecoration(color: PdfColors.orange100),
-              cellAlignment: pw.Alignment.center,
-            ),
-          ],
-        ),
-      );
-    }
 
     final dir = await getApplicationDocumentsDirectory();
     final f = File(
         '${dir.path}/HMP_GROUP_${DateFormat('yyyyMMdd_HHmmss').format(group.time)}.pdf');
     await f.writeAsBytes(await pdf.save());
     return f;
+  }
+
+  // ============================================================
+  //  PDF CURVE CHART BUILDER (custom painter)
+  // ============================================================
+  static pw.Widget _buildPdfCurveChart({
+    required List<Drop> drops,
+    required bool isSettlement,
+    required String unit,
+  }) {
+    const double width = 500;
+    const double height = 200;
+
+    // Compute range
+    double maxY = 0.01;
+    double minY = 0;
+    double maxX = 1;
+    for (final d in drops) {
+      final data = isSettlement
+          ? d.settlementCurve.map((v) => -v).toList()
+          : d.velocityCurve;
+      for (final v in data) {
+        if (v > maxY) maxY = v;
+        if (v < minY) minY = v;
+      }
+      for (final t in d.impactTimeCurve) {
+        if (t > maxX) maxX = t;
+      }
+    }
+    final pad = (maxY - minY) * 0.15;
+    maxY += pad;
+    minY -= pad;
+    if (maxY == minY) maxY = minY + 1;
+
+    const colors = [PdfColors.cyan700, PdfColors.orange700, PdfColors.green700];
+
+    return pw.Container(
+      height: height,
+      width: width,
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        border: pw.Border.all(color: PdfColors.grey400),
+      ),
+      child: pw.CustomPaint(
+        size: const PdfPoint(width, height),
+        painter: (PdfGraphics canvas, PdfPoint size) {
+          // Draw axes
+          canvas
+            ..setColor(PdfColors.black)
+            ..setLineWidth(0.5)
+            ..moveTo(30, 10)
+            ..lineTo(30, size.y - 20)
+            ..moveTo(30, size.y - 20)
+            ..lineTo(size.x - 10, size.y - 20)
+            ..strokePath();
+
+          // Draw each drop curve
+          for (int di = 0; di < drops.length; di++) {
+            final d = drops[di];
+            final rawData = isSettlement ? d.settlementCurve : d.velocityCurve;
+            if (rawData.isEmpty) continue;
+
+            final data = isSettlement
+                ? rawData.map((v) => -v).toList()
+                : rawData;
+            final times = d.impactTimeCurve.isNotEmpty
+                ? d.impactTimeCurve
+                : List.generate(data.length, (i) => i.toDouble());
+
+            final color = colors[di % colors.length];
+            canvas
+              ..setColor(color)
+              ..setLineWidth(1.2);
+
+            bool firstPoint = true;
+            for (int i = 0; i < data.length && i < times.length; i++) {
+              final nx = (times[i] / maxX);
+              final ny = (data[i] - minY) / (maxY - minY);
+              // Map to canvas coords
+              final px = 30 + nx * (size.x - 40);
+              final py = 10 + (1 - ny) * (size.y - 30);
+
+              if (firstPoint) {
+                canvas.moveTo(px, py);
+                firstPoint = false;
+              } else {
+                canvas.lineTo(px, py);
+              }
+            }
+            canvas.strokePath();
+          }
+        },
+      ),
+    );
   }
 }

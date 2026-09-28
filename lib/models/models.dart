@@ -11,7 +11,7 @@ class UserProfile {
   String email;
   String website;
   String? logoPath;
-  bool useMetric;
+  bool useMetric; // true = Metric (kgf/cm²), false = SI (MN/m²)
 
   UserProfile({
     this.companyName = '',
@@ -23,7 +23,7 @@ class UserProfile {
     this.email = '',
     this.website = '',
     this.logoPath,
-    this.useMetric = true,
+    this.useMetric = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -49,7 +49,7 @@ class UserProfile {
         email: j['email'] ?? '',
         website: j['website'] ?? '',
         logoPath: j['logoPath'],
-        useMetric: j['useMetric'] ?? true,
+        useMetric: j['useMetric'] ?? false,
       );
 }
 
@@ -61,9 +61,9 @@ class Drop {
   final double deflection;
   final double acceleration;
   final double velocity;
-  final List<double> settlementCurve;   // mm
-  final List<double> velocityCurve;     // m/s
-  final List<double> impactTimeCurve;   // ms
+  final List<double> settlementCurve;
+  final List<double> velocityCurve;
+  final List<double> impactTimeCurve;
 
   Drop({
     required this.id,

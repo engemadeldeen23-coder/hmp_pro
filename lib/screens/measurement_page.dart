@@ -69,7 +69,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
   double _currentVel = 0;
   bool _hasCurrentReading = false;
 
-  // Collected test drops
+  // Collected test drops (with curves)
   final List<Drop> _testDrops = [];
   double _avgEvd = 0;
   bool _testValid = false;
@@ -112,15 +112,21 @@ class _MeasurementPageState extends State<MeasurementPage> {
       _hasCurrentReading = true;
     });
 
-    // Register drop only during collecting phase
+    // Detect drop during collection
     if ((_stage == MeasurementStage.collectingPreload ||
             _stage == MeasurementStage.collectingTest) &&
         def > 0.005 &&
         !_busy) {
-      _captureDrop(isPreload: _stage == MeasurementStage.collectingPreload, m: m);
+      _captureDrop(
+        isPreload: _stage == MeasurementStage.collectingPreload,
+        m: m,
+      );
     }
   }
 
+  // ============================================================
+  //  CAPTURE DROP - parses ct, cd, cv (time, deflection, velocity)
+  // ============================================================
   Future<void> _captureDrop({
     required bool isPreload,
     required Map<String, dynamic> m,
@@ -128,21 +134,31 @@ class _MeasurementPageState extends State<MeasurementPage> {
     if (_busy) return;
     _busy = true;
 
-            // Parse curve data: ct=time, cd=deflection, cv=velocity
+    // ---- Parse curve data from ESP32 ----
+    // ct = curve time (ms)
+    // cd = curve deflection (mm)
+    // cv = curve velocity (m/s)
     List<double> curveT = [];
     List<double> curveD = [];
     List<double> curveV = [];
+
     try {
       if (m['ct'] != null) {
         curveT = (m['ct'] as List)
             .map((v) => (v as num).toDouble())
             .toList();
       }
+    } catch (_) {}
+
+    try {
       if (m['cd'] != null) {
         curveD = (m['cd'] as List)
             .map((v) => (v as num).toDouble())
             .toList();
       }
+    } catch (_) {}
+
+    try {
       if (m['cv'] != null) {
         curveV = (m['cv'] as List)
             .map((v) => (v as num).toDouble())
@@ -150,12 +166,16 @@ class _MeasurementPageState extends State<MeasurementPage> {
       }
     } catch (_) {}
 
-    // Fallback: if no curve from ESP32, synthesize from current reading
+    // Fallback if no curve data from ESP32
     if (curveD.isEmpty) {
       curveD = [0, _currentDef * 0.5, _currentDef, _currentDef * 0.7, 0];
       curveT = [0, 100, 200, 300, 400];
     }
+    if (curveV.isEmpty && curveD.isNotEmpty) {
+      curveV = List.filled(curveD.length, _currentVel);
+    }
 
+    // ---- Save test drop (preloads discarded) ----
     if (!isPreload) {
       final drop = Drop(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -189,8 +209,8 @@ class _MeasurementPageState extends State<MeasurementPage> {
       }
     } else {
       setState(() => _stage = MeasurementStage.idle);
-      widget.voice.say(
-          'Test ${_testIndex + 1} complete. EVD ${_currentEvd.round()}');
+      widget.voice
+          .say('Test ${_testIndex + 1} complete. EVD ${_currentEvd.round()}');
       _testIndex++;
 
       if (_testIndex >= _testCount) {
@@ -200,13 +220,12 @@ class _MeasurementPageState extends State<MeasurementPage> {
 
         setState(() => _stage = MeasurementStage.complete);
 
-        // Voice feedback
         if (_testValid) {
           widget.voice.say(
               'Successful test. Average EVD ${_avgEvd.round()} megaNewton per square meter');
         } else {
           widget.voice.say(
-              'Fail test. Average EVD ${_avgEvd.round()} megaNewton per square meter. Target not achieved');
+              'Fail test. Average EVD ${_avgEvd.round()} megaNewton per square meter');
         }
 
         await _saveGroup();
@@ -470,7 +489,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
   }
 
   // ============================================================
-  //  TEST CHART CARD - 3 CURVES OVERLAID
+  //  TEST CHART CARD - 3 curves overlaid (INVERTED settlement)
   // ============================================================
   Widget _testChartCard() {
     return Container(
@@ -528,15 +547,16 @@ class _MeasurementPageState extends State<MeasurementPage> {
       );
     }
 
-    // Compute range
+    // Compute range - INVERT settlement (plotted as negative values)
     double maxY = 0.01;
     double minY = 0;
     double maxX = 1;
 
     for (final d in _testDrops) {
       for (final v in d.settlementCurve) {
-        if (v > maxY) maxY = v;
-        if (v < minY) minY = v;
+        final inverted = -v;
+        if (inverted > maxY) maxY = inverted;
+        if (inverted < minY) minY = inverted;
       }
       if (d.impactTimeCurve.isNotEmpty) {
         final tmax =
@@ -608,7 +628,8 @@ class _MeasurementPageState extends State<MeasurementPage> {
             final x = (d.impactTimeCurve.length > i)
                 ? d.impactTimeCurve[i]
                 : i.toDouble();
-            spots.add(FlSpot(x, d.settlementCurve[i]));
+            // INVERT settlement - plotted as negative going down
+            spots.add(FlSpot(x, -d.settlementCurve[i]));
           }
           return LineChartBarData(
             spots: spots,

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../models/models.dart';
+import '../services/units_service.dart';
 
 class UserProfilePage extends StatefulWidget {
   final UserProfile profile;
@@ -29,7 +30,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
   late TextEditingController _email;
   late TextEditingController _website;
   String? _logoPath;
-  bool _useMetric = true;
+  String _unitSystem = UnitsService.SI;
 
   @override
   void initState() {
@@ -44,7 +45,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
     _email = TextEditingController(text: p.email);
     _website = TextEditingController(text: p.website);
     _logoPath = p.logoPath;
-    _useMetric = p.useMetric;
+    _unitSystem = p.useMetric ? UnitsService.METRIC : UnitsService.SI;
   }
 
   @override
@@ -65,6 +66,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
   }
 
   Future<void> _save() async {
+    final useMetric = _unitSystem == UnitsService.METRIC;
+    UnitsService.setSystem(_unitSystem);
+
     final p = UserProfile(
       companyName: _company.text.trim(),
       title: _title.text.trim(),
@@ -75,7 +79,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
       email: _email.text.trim(),
       website: _website.text.trim(),
       logoPath: _logoPath,
-      useMetric: _useMetric,
+      useMetric: useMetric,
     );
     await widget.onSave(p);
     if (mounted) Navigator.pop(context);
@@ -94,7 +98,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Logo
             Center(
               child: GestureDetector(
                 onTap: _pickLogo,
@@ -138,7 +141,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
             _field('Website', _website),
 
             const SizedBox(height: 16),
-            // Unit selection
+
+            // Unit System Selection
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -146,24 +150,34 @@ class _UserProfilePageState extends State<UserProfilePage> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: const Color(0xFF2A3654)),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.straighten,
-                      color: Color(0xFF00E5FF), size: 18),
-                  const SizedBox(width: 10),
-                  const Text('Units:',
-                      style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  const Spacer(),
-                  ChoiceChip(
-                    label: const Text('Metric'),
-                    selected: _useMetric,
-                    onSelected: (_) => setState(() => _useMetric = true),
+                  Row(
+                    children: const [
+                      Icon(Icons.straighten,
+                          color: Color(0xFF00E5FF), size: 18),
+                      SizedBox(width: 8),
+                      Text('UNIT SYSTEM',
+                          style: TextStyle(
+                              color: Colors.grey,
+                              fontSize: 11,
+                              letterSpacing: 1.5,
+                              fontWeight: FontWeight.w600)),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: const Text('Imperial'),
-                    selected: !_useMetric,
-                    onSelected: (_) => setState(() => _useMetric = false),
+                  const SizedBox(height: 12),
+                  _unitOption(
+                    title: 'SI Standard',
+                    subtitle: 'Deflection: mm · EVD: MN/m² · Velocity: m/s',
+                    value: UnitsService.SI,
+                  ),
+                  const SizedBox(height: 8),
+                  _unitOption(
+                    title: 'Metric',
+                    subtitle:
+                        'Deflection: cm · EVD: kgf/cm² · Velocity: cm/s',
+                    value: UnitsService.METRIC,
                   ),
                 ],
               ),
@@ -220,6 +234,58 @@ class _UserProfilePageState extends State<UserProfilePage> {
     );
   }
 
+  Widget _unitOption({
+    required String title,
+    required String subtitle,
+    required String value,
+  }) {
+    final selected = _unitSystem == value;
+    return GestureDetector(
+      onTap: () => setState(() => _unitSystem = value),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: selected
+              ? const Color(0xFF00E5FF).withOpacity(0.1)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF00E5FF)
+                : const Color(0xFF2A3654),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Radio<String>(
+              value: value,
+              groupValue: _unitSystem,
+              onChanged: (v) => setState(() => _unitSystem = v!),
+              activeColor: const Color(0xFF00E5FF),
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: selected ? Colors.white : Colors.grey.shade300,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: TextStyle(
+                          color: Colors.grey.shade500, fontSize: 10)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _field(String label, TextEditingController c,
       {TextInputType? keyboard}) {
     return Padding(
@@ -231,8 +297,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
         decoration: InputDecoration(
           labelText: label,
           labelStyle: TextStyle(color: Colors.grey.shade500, fontSize: 12),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10)),
+          border:
+              OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
           filled: true,
           fillColor: const Color(0xFF151B2E),
         ),

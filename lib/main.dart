@@ -1,3 +1,4 @@
+import 'services/units_service.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -264,6 +265,8 @@ class _HomePageState extends State<HomePage> {
         _gpsRecordingEnabled = await _storage.loadGpsRecordingEnabled();
         _voiceEnabled = await _storage.loadVoiceEnabled();
         _voice.setEnabled(_voiceEnabled);
+        UnitsService.setSystem(
+            _profile.useMetric ? UnitsService.METRIC : UnitsService.SI);
       } catch (e) {
         print('Storage error: $e');
       }

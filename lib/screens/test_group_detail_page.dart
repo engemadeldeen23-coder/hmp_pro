@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/models.dart';
 import '../services/export_service.dart';
+import '../services/units_service.dart';
 
 class TestGroupDetailPage extends StatelessWidget {
   final TestGroup group;
@@ -166,28 +167,19 @@ class TestGroupDetailPage extends StatelessWidget {
     );
   }
 
+  // ---- Settlement chart (INVERTED: plotted as negative going down) ----
   Widget _buildSettlementChart() {
     return _chartCard(
-      title: 'SETTLEMENT vs IMPACT TIME (3 DROPS)',
-      unit: 'mm',
-      curves: group.drops
-          .asMap()
-          .entries
-          .map((e) => (e.value, e.key))
-          .toList(),
+      title: 'SETTLEMENT vs IMPACT TIME',
+      unit: UnitsService.deflectionUnit(),
       isSettlement: true,
     );
   }
 
   Widget _buildVelocityChart() {
     return _chartCard(
-      title: 'VELOCITY vs IMPACT TIME (3 DROPS)',
-      unit: 'm/s',
-      curves: group.drops
-          .asMap()
-          .entries
-          .map((e) => (e.value, e.key))
-          .toList(),
+      title: 'VELOCITY vs IMPACT TIME',
+      unit: UnitsService.velocityUnit(),
       isSettlement: false,
     );
   }
@@ -195,7 +187,6 @@ class TestGroupDetailPage extends StatelessWidget {
   Widget _chartCard({
     required String title,
     required String unit,
-    required List<(Drop, int)> curves,
     required bool isSettlement,
   }) {
     double maxY = 0.01;
@@ -203,19 +194,19 @@ class TestGroupDetailPage extends StatelessWidget {
     double maxX = 1;
     bool hasData = false;
 
-    for (final (d, _) in curves) {
-      final data =
-          isSettlement ? d.settlementCurve : d.velocityCurve;
+    for (final d in group.drops) {
+      final data = isSettlement
+          ? d.settlementCurve.map((v) => -v).toList()  // INVERT settlement
+          : d.velocityCurve;
       if (data.isEmpty) continue;
       hasData = true;
       for (final v in data) {
         if (v > maxY) maxY = v;
         if (v < minY) minY = v;
       }
-      // X range from impact time
       if (d.impactTimeCurve.isNotEmpty) {
-        final tmax = d.impactTimeCurve
-            .reduce((a, b) => a > b ? a : b);
+        final tmax =
+            d.impactTimeCurve.reduce((a, b) => a > b ? a : b);
         if (tmax > maxX) maxX = tmax;
       } else if (data.length > maxX) {
         maxX = data.length.toDouble();
@@ -244,7 +235,7 @@ class TestGroupDetailPage extends StatelessWidget {
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           SizedBox(
-            height: 200,
+            height: 220,
             child: !hasData
                 ? Center(
                     child: Text('No curve data',
@@ -285,7 +276,7 @@ class TestGroupDetailPage extends StatelessWidget {
                         leftTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            reservedSize: 44,
+                            reservedSize: 48,
                             interval:
                                 ((maxY - minY) / 4).clamp(0.01, 100),
                             getTitlesWidget: (v, _) => Text(
@@ -302,20 +293,25 @@ class TestGroupDetailPage extends StatelessWidget {
                       maxX: maxX,
                       minY: minY,
                       maxY: maxY,
-                      lineBarsData: curves
+                      lineBarsData: group.drops
                           .asMap()
                           .entries
-                          .where((e) =>
-                              (isSettlement
-                                      ? e.value.$1.settlementCurve
-                                      : e.value.$1.velocityCurve)
-                                  .isNotEmpty)
+                          .where((e) {
+                            final data = isSettlement
+                                ? e.value.settlementCurve
+                                : e.value.velocityCurve;
+                            return data.isNotEmpty;
+                          })
                           .map((e) {
-                        final d = e.value.$1;
-                        final idx = e.value.$2;
-                        final data = isSettlement
+                        final d = e.value;
+                        final idx = e.key;
+                        final rawData = isSettlement
                             ? d.settlementCurve
                             : d.velocityCurve;
+                        // INVERT settlement
+                        final data = isSettlement
+                            ? rawData.map((v) => -v).toList()
+                            : rawData;
                         final timeData = d.impactTimeCurve;
 
                         final spots = <FlSpot>[];
@@ -391,19 +387,19 @@ class TestGroupDetailPage extends StatelessWidget {
               border: TableBorder.all(
                   color: const Color(0xFF2A3654), width: 1),
               columnWidths: const {
-                0: FixedColumnWidth(60),   // Test (WIDER)
-                1: FixedColumnWidth(85),
-                2: FixedColumnWidth(80),
-                3: FixedColumnWidth(80),
-                4: FixedColumnWidth(70),
-                5: FixedColumnWidth(85),
+                0: FixedColumnWidth(70),
+                1: FixedColumnWidth(90),
+                2: FixedColumnWidth(90),
+                3: FixedColumnWidth(90),
+                4: FixedColumnWidth(80),
+                5: FixedColumnWidth(90),
               },
               children: [
                 _tableHeader([
                   'Test',
-                  'Settle (mm)',
-                  'Velocity',
-                  'EVD',
+                  'Settle (${UnitsService.deflectionUnit()})',
+                  'Velocity (${UnitsService.velocityUnit()})',
+                  'EVD (${UnitsService.evdUnit()})',
                   'Acc (g)',
                   'S/V',
                 ]),
@@ -411,9 +407,11 @@ class TestGroupDetailPage extends StatelessWidget {
                   final d = e.value;
                   return _tableRow([
                     'Test ${e.key + 1}',
-                    d.deflection.toStringAsFixed(3),
-                    d.velocity.toStringAsFixed(3),
-                    d.evd.toStringAsFixed(1),
+                    UnitsService.deflection(d.deflection)
+                        .toStringAsFixed(3),
+                    UnitsService.velocity(d.velocity)
+                        .toStringAsFixed(3),
+                    UnitsService.evd(d.evd).toStringAsFixed(2),
                     d.acceleration.toStringAsFixed(3),
                     d.sOverV.toStringAsFixed(3),
                   ]);
@@ -466,20 +464,20 @@ class TestGroupDetailPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          _avgRow('EVD Mean (MN/m²)',
-              group.avgEvd.toStringAsFixed(2)),
-          _avgRow('Settlement Mean (mm)',
-              group.avgDeflection.toStringAsFixed(4)),
-          _avgRow('Deflection Mean (mm)',
-              group.avgDeflection.toStringAsFixed(4)),
-          _avgRow('Velocity Mean (m/s)',
-              group.avgVelocity.toStringAsFixed(4)),
+          _avgRow(
+              'EVD Mean (${UnitsService.evdUnit()})',
+              UnitsService.evd(group.avgEvd).toStringAsFixed(2)),
+          _avgRow(
+              'Settlement Mean (${UnitsService.deflectionUnit()})',
+              UnitsService.deflection(group.avgDeflection)
+                  .toStringAsFixed(4)),
+          _avgRow(
+              'Velocity Mean (${UnitsService.velocityUnit()})',
+              UnitsService.velocity(group.avgVelocity).toStringAsFixed(4)),
           _avgRow('Acceleration Mean (g)',
               group.avgAcceleration.toStringAsFixed(4)),
-          _avgRow('S/V Max (mm·s/m)',
-              group.maxSOverV.toStringAsFixed(4)),
-          _avgRow('S/V Mean (mm·s/m)',
-              group.avgSOverV.toStringAsFixed(4)),
+          _avgRow('S/V Max', group.maxSOverV.toStringAsFixed(4)),
+          _avgRow('S/V Mean', group.avgSOverV.toStringAsFixed(4)),
         ],
       ),
     );
