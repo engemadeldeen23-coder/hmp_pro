@@ -166,32 +166,51 @@ class TestGroupDetailPage extends StatelessWidget {
     );
   }
 
+  // ============================================================
+  //  HMP GL4-STYLE CURVE BUILDER (trimmed to impact period)
+  // ============================================================
   List<FlSpot> _buildHmpSpots(Drop d) {
     if (d.settlementCurve.isEmpty) return [];
-
-    final times = d.impactTimeCurve.isNotEmpty
-        ? d.impactTimeCurve
-        : List<double>.generate(
-            d.settlementCurve.length, (i) => i * 25.0);
 
     final n = d.settlementCurve.length;
     if (n < 2) return [];
 
+    double maxSettle = 0;
+    for (final v in d.settlementCurve) {
+      if (v.abs() > maxSettle) maxSettle = v.abs();
+    }
+    if (maxSettle == 0) return [];
+
+    final threshold = maxSettle * 0.05;
+    int lastIdx = n - 1;
+    for (int i = n - 1; i >= 0; i--) {
+      if (d.settlementCurve[i].abs() > threshold) {
+        lastIdx = i;
+        break;
+      }
+    }
+    if (lastIdx < 1) lastIdx = n - 1;
+
+    final times = d.impactTimeCurve.isNotEmpty
+        ? d.impactTimeCurve
+        : List<double>.generate(n, (i) => i * 25.0);
+
     final first = d.settlementCurve.first;
-    final last = d.settlementCurve.last;
+    final last = d.settlementCurve[lastIdx];
 
     final spots = <FlSpot>[];
     spots.add(const FlSpot(0, 0));
 
-    for (int i = 0; i < n; i++) {
-      final t = i / (n - 1);
+    for (int i = 0; i <= lastIdx; i++) {
+      final t = lastIdx > 0 ? i / lastIdx : 0.0;
       final correction = first * (1 - t) + last * t;
       final corrected = (d.settlementCurve[i] - correction).abs();
       final x = i < times.length ? times[i] : i * 25.0;
       spots.add(FlSpot(x, -corrected));
     }
 
-    final lastTime = times.isNotEmpty ? times.last : (n - 1).toDouble();
+    final lastTime =
+        times.length > lastIdx ? times[lastIdx] : (lastIdx * 25.0);
     if (lastTime > 0) {
       spots.add(FlSpot(lastTime, 0));
     }
@@ -206,15 +225,31 @@ class TestGroupDetailPage extends StatelessWidget {
 
     for (final d in group.drops) {
       if (d.settlementCurve.isNotEmpty) hasData = true;
+
+      double localMaxSettle = 0;
       for (final v in d.settlementCurve) {
-        if (v.abs() > maxSettle) maxSettle = v.abs();
+        if (v.abs() > localMaxSettle) localMaxSettle = v.abs();
       }
-      for (final t in d.impactTimeCurve) {
-        if (t > maxX) maxX = t;
+      if (localMaxSettle > maxSettle) maxSettle = localMaxSettle;
+
+      // Only consider impact-time up to last significant point
+      final threshold = localMaxSettle * 0.05;
+      final times = d.impactTimeCurve.isNotEmpty
+          ? d.impactTimeCurve
+          : List<double>.generate(
+              d.settlementCurve.length, (i) => i * 25.0);
+
+      for (int i = d.settlementCurve.length - 1; i >= 0; i--) {
+        if (d.settlementCurve[i].abs() > threshold) {
+          final t = i < times.length ? times[i] : i * 25.0;
+          if (t > maxX) maxX = t;
+          break;
+        }
       }
     }
 
     if (maxSettle == 0) maxSettle = 0.1;
+    if (maxX <= 0) maxX = 1;
 
     final double chartMaxY = maxSettle * 0.25;
     final double chartMinY = -maxSettle * 1.15;
