@@ -13,7 +13,7 @@ class TestGroupDetailPage extends StatelessWidget {
   final String jobName;
   final String locationName;
 
-  static const double _trimThreshold = 0.30;
+  static const double _trimThreshold = 0.20;  // 20% - slightly wider
 
   const TestGroupDetailPage({
     super.key,
