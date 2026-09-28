@@ -13,6 +13,8 @@ class TestGroupDetailPage extends StatelessWidget {
   final String jobName;
   final String locationName;
 
+  static const double _trimThreshold = 0.30;
+
   const TestGroupDetailPage({
     super.key,
     required this.group,
@@ -167,50 +169,66 @@ class TestGroupDetailPage extends StatelessWidget {
   }
 
   // ============================================================
-  //  HMP GL4-STYLE CURVE BUILDER (trimmed to impact period)
+  //  TIGHT CONE: [startIdx, endIdx] where settlement > 30% of max
   // ============================================================
-  List<FlSpot> _buildHmpSpots(Drop d) {
-    if (d.settlementCurve.isEmpty) return [];
-
+  List<int> _getImpactRange(Drop d) {
     final n = d.settlementCurve.length;
-    if (n < 2) return [];
+    if (n < 2) return [0, 0];
 
     double maxSettle = 0;
     for (final v in d.settlementCurve) {
       if (v.abs() > maxSettle) maxSettle = v.abs();
     }
-    if (maxSettle == 0) return [];
+    if (maxSettle == 0) return [0, n - 1];
 
-    final threshold = maxSettle * 0.05;
-    int lastIdx = n - 1;
-    for (int i = n - 1; i >= 0; i--) {
-      if (d.settlementCurve[i].abs() > threshold) {
-        lastIdx = i;
+    final threshold = maxSettle * _trimThreshold;
+
+    int startIdx = 0;
+    for (int i = 0; i < n; i++) {
+      if (d.settlementCurve[i].abs() >= threshold) {
+        startIdx = i;
         break;
       }
     }
-    if (lastIdx < 1) lastIdx = n - 1;
+
+    int endIdx = n - 1;
+    for (int i = n - 1; i >= 0; i--) {
+      if (d.settlementCurve[i].abs() >= threshold) {
+        endIdx = i;
+        break;
+      }
+    }
+
+    if (endIdx <= startIdx) {
+      startIdx = 0;
+      endIdx = n - 1;
+    }
+
+    return [startIdx, endIdx];
+  }
+
+  List<FlSpot> _buildHmpSpots(Drop d) {
+    if (d.settlementCurve.isEmpty) return [];
+    final n = d.settlementCurve.length;
+    if (n < 2) return [];
+
+    final range = _getImpactRange(d);
+    final startIdx = range[0];
+    final endIdx = range[1];
 
     final times = d.impactTimeCurve.isNotEmpty
         ? d.impactTimeCurve
         : List<double>.generate(n, (i) => i * 25.0);
 
-    final first = d.settlementCurve.first;
-    final last = d.settlementCurve[lastIdx];
-
     final spots = <FlSpot>[];
     spots.add(const FlSpot(0, 0));
 
-    for (int i = 0; i <= lastIdx; i++) {
-      final t = lastIdx > 0 ? i / lastIdx : 0.0;
-      final correction = first * (1 - t) + last * t;
-      final corrected = (d.settlementCurve[i] - correction).abs();
+    for (int i = startIdx; i <= endIdx; i++) {
       final x = i < times.length ? times[i] : i * 25.0;
-      spots.add(FlSpot(x, -corrected));
+      spots.add(FlSpot(x, -d.settlementCurve[i].abs()));
     }
 
-    final lastTime =
-        times.length > lastIdx ? times[lastIdx] : (lastIdx * 25.0);
+    final lastTime = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
     if (lastTime > 0) {
       spots.add(FlSpot(lastTime, 0));
     }
@@ -232,20 +250,14 @@ class TestGroupDetailPage extends StatelessWidget {
       }
       if (localMaxSettle > maxSettle) maxSettle = localMaxSettle;
 
-      // Only consider impact-time up to last significant point
-      final threshold = localMaxSettle * 0.05;
+      final range = _getImpactRange(d);
+      final endIdx = range[1];
       final times = d.impactTimeCurve.isNotEmpty
           ? d.impactTimeCurve
           : List<double>.generate(
               d.settlementCurve.length, (i) => i * 25.0);
-
-      for (int i = d.settlementCurve.length - 1; i >= 0; i--) {
-        if (d.settlementCurve[i].abs() > threshold) {
-          final t = i < times.length ? times[i] : i * 25.0;
-          if (t > maxX) maxX = t;
-          break;
-        }
-      }
+      final t = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
+      if (t > maxX) maxX = t;
     }
 
     if (maxSettle == 0) maxSettle = 0.1;
@@ -303,7 +315,7 @@ class TestGroupDetailPage extends StatelessWidget {
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: 24,
-                            interval: (maxX / 4).clamp(1, 1000).toDouble(),
+                            interval: (maxX / 4).clamp(0.5, 1000).toDouble(),
                             getTitlesWidget: (v, _) => Text(
                               v.toStringAsFixed(0),
                               style: TextStyle(
@@ -388,12 +400,18 @@ class TestGroupDetailPage extends StatelessWidget {
       for (final v in d.velocityCurve) {
         if (v.abs() > maxVel) maxVel = v.abs();
       }
-      for (final t in d.impactTimeCurve) {
-        if (t > maxX) maxX = t;
-      }
+      final range = _getImpactRange(d);
+      final endIdx = range[1];
+      final times = d.impactTimeCurve.isNotEmpty
+          ? d.impactTimeCurve
+          : List<double>.generate(
+              d.settlementCurve.length, (i) => i * 25.0);
+      final t = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
+      if (t > maxX) maxX = t;
     }
 
     if (maxVel == 0) maxVel = 0.1;
+    if (maxX <= 0) maxX = 1;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -444,7 +462,7 @@ class TestGroupDetailPage extends StatelessWidget {
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: 24,
-                            interval: (maxX / 4).clamp(1, 1000).toDouble(),
+                            interval: (maxX / 4).clamp(0.5, 1000).toDouble(),
                             getTitlesWidget: (v, _) => Text(
                               v.toStringAsFixed(0),
                               style: TextStyle(
@@ -478,13 +496,22 @@ class TestGroupDetailPage extends StatelessWidget {
                           .where((e) => e.value.velocityCurve.isNotEmpty)
                           .map((e) {
                         final d = e.value;
+                        final range = _getImpactRange(d);
+                        final startIdx = range[0];
+                        final endIdx = range[1];
+                        final times = d.impactTimeCurve.isNotEmpty
+                            ? d.impactTimeCurve
+                            : List<double>.generate(
+                                d.settlementCurve.length, (i) => i * 25.0);
+
                         final spots = <FlSpot>[];
-                        for (int i = 0; i < d.velocityCurve.length; i++) {
-                          final x = (d.impactTimeCurve.length > i)
-                              ? d.impactTimeCurve[i]
-                              : i.toDouble();
+                        for (int i = startIdx;
+                            i <= endIdx && i < d.velocityCurve.length;
+                            i++) {
+                          final x = i < times.length ? times[i] : i * 25.0;
                           spots.add(FlSpot(x, d.velocityCurve[i]));
                         }
+
                         return LineChartBarData(
                           spots: spots,
                           isCurved: true,

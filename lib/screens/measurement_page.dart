@@ -56,6 +56,7 @@ class MeasurementPage extends StatefulWidget {
 class _MeasurementPageState extends State<MeasurementPage> {
   static const int _preloadCount = 3;
   static const int _testCount = 3;
+  static const double _trimThreshold = 0.30; // 30% - tight cone
 
   late Location _location;
 
@@ -523,54 +524,70 @@ class _MeasurementPageState extends State<MeasurementPage> {
   }
 
   // ============================================================
-  //  HMP GL4-STYLE CURVE BUILDER (trimmed to impact period)
+  //  TIGHT CONE: Find [startIdx, endIdx] around peak where
+  //  settlement > 30% of max
   // ============================================================
-  List<FlSpot> _buildHmpSpots(Drop d) {
-    if (d.settlementCurve.isEmpty) return [];
-
+  List<int> _getImpactRange(Drop d) {
     final n = d.settlementCurve.length;
-    if (n < 2) return [];
+    if (n < 2) return [0, 0];
 
     double maxSettle = 0;
     for (final v in d.settlementCurve) {
       if (v.abs() > maxSettle) maxSettle = v.abs();
     }
-    if (maxSettle == 0) return [];
+    if (maxSettle == 0) return [0, n - 1];
 
-    // Find LAST index where settlement is still significant (> 5% of max)
-    final threshold = maxSettle * 0.05;
-    int lastIdx = n - 1;
-    for (int i = n - 1; i >= 0; i--) {
-      if (d.settlementCurve[i].abs() > threshold) {
-        lastIdx = i;
+    final threshold = maxSettle * _trimThreshold;
+
+    int startIdx = 0;
+    for (int i = 0; i < n; i++) {
+      if (d.settlementCurve[i].abs() >= threshold) {
+        startIdx = i;
         break;
       }
     }
-    if (lastIdx < 1) lastIdx = n - 1;
+
+    int endIdx = n - 1;
+    for (int i = n - 1; i >= 0; i--) {
+      if (d.settlementCurve[i].abs() >= threshold) {
+        endIdx = i;
+        break;
+      }
+    }
+
+    if (endIdx <= startIdx) {
+      startIdx = 0;
+      endIdx = n - 1;
+    }
+
+    return [startIdx, endIdx];
+  }
+
+  List<FlSpot> _buildHmpSpots(Drop d) {
+    if (d.settlementCurve.isEmpty) return [];
+    final n = d.settlementCurve.length;
+    if (n < 2) return [];
+
+    final range = _getImpactRange(d);
+    final startIdx = range[0];
+    final endIdx = range[1];
 
     final times = d.impactTimeCurve.isNotEmpty
         ? d.impactTimeCurve
         : List<double>.generate(n, (i) => i * 25.0);
 
-    final first = d.settlementCurve.first;
-    final last = d.settlementCurve[lastIdx];
-
     final spots = <FlSpot>[];
     // Force start at origin
     spots.add(const FlSpot(0, 0));
 
-    // Only emit points up to last significant index
-    for (int i = 0; i <= lastIdx; i++) {
-      final t = lastIdx > 0 ? i / lastIdx : 0.0;
-      final correction = first * (1 - t) + last * t;
-      final corrected = (d.settlementCurve[i] - correction).abs();
+    // Emit only points within the impact range
+    for (int i = startIdx; i <= endIdx; i++) {
       final x = i < times.length ? times[i] : i * 25.0;
-      spots.add(FlSpot(x, -corrected));
+      spots.add(FlSpot(x, -d.settlementCurve[i].abs()));
     }
 
-    // Force end at last impact time (settlement = 0)
-    final lastTime =
-        times.length > lastIdx ? times[lastIdx] : (lastIdx * 25.0);
+    // Force end at last impact time
+    final lastTime = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
     if (lastTime > 0) {
       spots.add(FlSpot(lastTime, 0));
     }
@@ -594,27 +611,22 @@ class _MeasurementPageState extends State<MeasurementPage> {
     double maxX = 1;
 
     for (final d in _testDrops) {
-      // Find peak settlement for this drop
+      // Peak settlement
       double localMaxSettle = 0;
       for (final v in d.settlementCurve) {
         if (v.abs() > localMaxSettle) localMaxSettle = v.abs();
       }
       if (localMaxSettle > maxSettle) maxSettle = localMaxSettle;
 
-      // Use only impact-time up to last significant point
-      final threshold = localMaxSettle * 0.05;
+      // Max time from impact range only
+      final range = _getImpactRange(d);
+      final endIdx = range[1];
       final times = d.impactTimeCurve.isNotEmpty
           ? d.impactTimeCurve
           : List<double>.generate(
               d.settlementCurve.length, (i) => i * 25.0);
-
-      for (int i = d.settlementCurve.length - 1; i >= 0; i--) {
-        if (d.settlementCurve[i].abs() > threshold) {
-          final t = i < times.length ? times[i] : i * 25.0;
-          if (t > maxX) maxX = t;
-          break;
-        }
-      }
+      final t = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
+      if (t > maxX) maxX = t;
     }
 
     if (maxSettle == 0) maxSettle = 0.1;
@@ -647,7 +659,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 22,
-              interval: (maxX / 4).clamp(1, 1000).toDouble(),
+              interval: (maxX / 4).clamp(0.5, 1000).toDouble(),
               getTitlesWidget: (v, _) => Text(
                 v.toStringAsFixed(0),
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 8),
