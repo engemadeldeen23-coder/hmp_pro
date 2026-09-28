@@ -8,6 +8,7 @@ import '../services/ble_service.dart';
 import '../services/gps_service.dart';
 import '../services/voice_service.dart';
 import '../services/storage_service.dart';
+import '../services/units_service.dart';
 import '../widgets/magic_eye.dart';
 
 enum MeasurementStage {
@@ -69,7 +70,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
   double _currentVel = 0;
   bool _hasCurrentReading = false;
 
-  // Collected test drops (with curves)
   final List<Drop> _testDrops = [];
   double _avgEvd = 0;
   bool _testValid = false;
@@ -112,7 +112,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
       _hasCurrentReading = true;
     });
 
-    // Detect drop during collection
     if ((_stage == MeasurementStage.collectingPreload ||
             _stage == MeasurementStage.collectingTest) &&
         def > 0.005 &&
@@ -124,9 +123,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
     }
   }
 
-  // ============================================================
-  //  CAPTURE DROP - parses ct, cd, cv (time, deflection, velocity)
-  // ============================================================
   Future<void> _captureDrop({
     required bool isPreload,
     required Map<String, dynamic> m,
@@ -134,10 +130,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
     if (_busy) return;
     _busy = true;
 
-    // ---- Parse curve data from ESP32 ----
-    // ct = curve time (ms)
-    // cd = curve deflection (mm)
-    // cv = curve velocity (m/s)
+    // Parse curve data from ESP32
     List<double> curveT = [];
     List<double> curveD = [];
     List<double> curveV = [];
@@ -149,7 +142,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
             .toList();
       }
     } catch (_) {}
-
     try {
       if (m['cd'] != null) {
         curveD = (m['cd'] as List)
@@ -157,7 +149,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
             .toList();
       }
     } catch (_) {}
-
     try {
       if (m['cv'] != null) {
         curveV = (m['cv'] as List)
@@ -166,7 +157,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
       }
     } catch (_) {}
 
-    // Fallback if no curve data from ESP32
     if (curveD.isEmpty) {
       curveD = [0, _currentDef * 0.5, _currentDef, _currentDef * 0.7, 0];
       curveT = [0, 100, 200, 300, 400];
@@ -175,7 +165,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
       curveV = List.filled(curveD.length, _currentVel);
     }
 
-    // ---- Save test drop (preloads discarded) ----
     if (!isPreload) {
       final drop = Drop(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
@@ -222,10 +211,9 @@ class _MeasurementPageState extends State<MeasurementPage> {
 
         if (_testValid) {
           widget.voice.say(
-              'Successful test. Average EVD ${_avgEvd.round()} megaNewton per square meter');
+              'Successful test. Average EVD ${_avgEvd.round()}');
         } else {
-          widget.voice.say(
-              'Fail test. Average EVD ${_avgEvd.round()} megaNewton per square meter');
+          widget.voice.say('Fail test');
         }
 
         await _saveGroup();
@@ -394,10 +382,12 @@ class _MeasurementPageState extends State<MeasurementPage> {
       case MeasurementStage.collectingTest:
         return ('Drop the weight now...', Colors.greenAccent, 'RECORDING...');
       case MeasurementStage.complete:
+        final evdVal = UnitsService.evd(_avgEvd).toStringAsFixed(2);
+        final unit = UnitsService.evdUnit();
         return (
           _testValid
-              ? 'VALID TEST. EVD_mean: ${_avgEvd.toStringAsFixed(1)} MN/m²'
-              : 'INVALID TEST. EVD_mean: ${_avgEvd.toStringAsFixed(1)} MN/m²',
+              ? 'VALID TEST. EVD_mean: $evdVal $unit'
+              : 'INVALID TEST. EVD_mean: $evdVal $unit',
           _testValid ? Colors.greenAccent : Colors.redAccent,
           _testValid ? 'SUCCESS' : 'FAIL'
         );
@@ -415,12 +405,27 @@ class _MeasurementPageState extends State<MeasurementPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _metric('EVD', _currentEvd.toStringAsFixed(1), 'MN/m²',
-              const Color(0xFF00E5FF), 20),
-          _metric('DEFL', _currentDef.toStringAsFixed(3), 'mm',
-              Colors.orangeAccent, 14),
-          _metric('VEL', _currentVel.toStringAsFixed(3), 'm/s',
-              Colors.greenAccent, 12),
+          _metric(
+            'EVD',
+            UnitsService.evd(_currentEvd).toStringAsFixed(1),
+            UnitsService.evdUnit(),
+            const Color(0xFF00E5FF),
+            20,
+          ),
+          _metric(
+            'DEFL',
+            UnitsService.deflection(_currentDef).toStringAsFixed(2),
+            UnitsService.deflectionUnit(),
+            Colors.orangeAccent,
+            14,
+          ),
+          _metric(
+            'VEL',
+            UnitsService.velocity(_currentVel).toStringAsFixed(2),
+            UnitsService.velocityUnit(),
+            Colors.greenAccent,
+            12,
+          ),
           _metric('ACC', _currentAcc.toStringAsFixed(2), 'g',
               Colors.purpleAccent, 12),
         ],
@@ -488,9 +493,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
     );
   }
 
-  // ============================================================
-  //  TEST CHART CARD - 3 curves overlaid (INVERTED settlement)
-  // ============================================================
   Widget _testChartCard() {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -507,8 +509,9 @@ class _MeasurementPageState extends State<MeasurementPage> {
               const Icon(Icons.show_chart,
                   color: Color(0xFF00E5FF), size: 14),
               const SizedBox(width: 6),
-              const Text('SETTLEMENT vs IMPACT TIME',
-                  style: TextStyle(
+              Text(
+                  'SETTLEMENT vs IMPACT TIME (${UnitsService.deflectionUnit()})',
+                  style: const TextStyle(
                       color: Colors.grey,
                       fontSize: 10,
                       letterSpacing: 1.5,
@@ -535,6 +538,9 @@ class _MeasurementPageState extends State<MeasurementPage> {
     return colors[i % colors.length];
   }
 
+  // ============================================================
+  //  INVERSE CONE SETTLEMENT CHART (TerraTest style)
+  // ============================================================
   Widget _buildMultiCurveChart() {
     if (_testDrops.isEmpty) {
       return Center(
@@ -547,37 +553,36 @@ class _MeasurementPageState extends State<MeasurementPage> {
       );
     }
 
-    // Compute range - INVERT settlement (plotted as negative values)
-    double maxY = 0.01;
-    double minY = 0;
+    // Compute max settlement across all drops
+    double maxSettle = 0;
     double maxX = 1;
-
     for (final d in _testDrops) {
       for (final v in d.settlementCurve) {
-        final inverted = -v;
-        if (inverted > maxY) maxY = inverted;
-        if (inverted < minY) minY = inverted;
+        if (v.abs() > maxSettle) maxSettle = v.abs();
       }
       if (d.impactTimeCurve.isNotEmpty) {
-        final tmax =
-            d.impactTimeCurve.reduce((a, b) => a > b ? a : b);
+        final tmax = d.impactTimeCurve.reduce((a, b) => a > b ? a : b);
         if (tmax > maxX) maxX = tmax;
       }
     }
 
-    final pad = (maxY - minY) * 0.15;
-    maxY += pad;
-    minY -= pad;
+    // INVERSE CONE: chart goes from y=0 (top) down to y=-maxSettle (bottom)
+    // 15% padding at bottom
+    final double chartMaxY = maxSettle * 0.15;   // some space above 0
+    final double chartMinY = -maxSettle * 1.15;  // extra space below
 
     return LineChart(
       LineChartData(
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,
-          horizontalInterval: ((maxY - minY) / 4).clamp(0.01, 100),
-          getDrawingHorizontalLine: (_) => FlLine(
-            color: Colors.grey.shade900,
-            strokeWidth: 1,
+          horizontalInterval: maxSettle / 3 > 0 ? maxSettle / 3 : 0.1,
+          getDrawingHorizontalLine: (value) => FlLine(
+            color: value == 0
+                ? Colors.white.withOpacity(0.5) // Reference line at 0
+                : Colors.grey.shade900,
+            strokeWidth: value == 0 ? 1.5 : 1,
+            dashArray: value == 0 ? [4, 4] : null,
           ),
         ),
         titlesData: FlTitlesData(
@@ -601,21 +606,24 @@ class _MeasurementPageState extends State<MeasurementPage> {
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 36,
-              interval: ((maxY - minY) / 4).clamp(0.01, 100),
-              getTitlesWidget: (v, _) => Text(
-                v.toStringAsFixed(2),
-                style:
-                    TextStyle(color: Colors.grey.shade600, fontSize: 8),
-              ),
+              reservedSize: 40,
+              interval: maxSettle / 3 > 0 ? maxSettle / 3 : 0.1,
+              getTitlesWidget: (v, _) {
+                // Display absolute value so bottom shows positive numbers
+                return Text(
+                  v.abs().toStringAsFixed(2),
+                  style:
+                      TextStyle(color: Colors.grey.shade600, fontSize: 8),
+                );
+              },
             ),
           ),
         ),
         borderData: FlBorderData(show: false),
         minX: 0,
         maxX: maxX,
-        minY: minY,
-        maxY: maxY,
+        minY: chartMinY,
+        maxY: chartMaxY,
         lineBarsData: _testDrops
             .asMap()
             .entries
@@ -628,19 +636,19 @@ class _MeasurementPageState extends State<MeasurementPage> {
             final x = (d.impactTimeCurve.length > i)
                 ? d.impactTimeCurve[i]
                 : i.toDouble();
-            // INVERT settlement - plotted as negative going down
-            spots.add(FlSpot(x, -d.settlementCurve[i]));
+            // INVERSE: plot as negative so curve dips down
+            spots.add(FlSpot(x, -d.settlementCurve[i].abs()));
           }
           return LineChartBarData(
             spots: spots,
             isCurved: true,
-            curveSmoothness: 0.2,
+            curveSmoothness: 0.25,
             color: _colorForIndex(idx),
             barWidth: 2.5,
             dotData: const FlDotData(show: false),
             belowBarData: BarAreaData(
               show: true,
-              color: _colorForIndex(idx).withOpacity(0.1),
+              color: _colorForIndex(idx).withOpacity(0.15),
             ),
           );
         }).toList(),

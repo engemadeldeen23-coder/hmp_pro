@@ -135,6 +135,7 @@ class TestGroupDetailPage extends StatelessWidget {
           _infoRow('Location', locationName),
           _infoRow('Plate diameter',
               '${group.plateDiameterMm.toStringAsFixed(0)} mm'),
+          _infoRow('Unit System', UnitsService.system),
           if (group.hasLocation)
             _infoRow('GPS',
                 '${group.latitude.toStringAsFixed(6)}, ${group.longitude.toStringAsFixed(6)}'),
@@ -167,55 +168,36 @@ class TestGroupDetailPage extends StatelessWidget {
     );
   }
 
-  // ---- Settlement chart (INVERTED: plotted as negative going down) ----
   Widget _buildSettlementChart() {
-    return _chartCard(
-      title: 'SETTLEMENT vs IMPACT TIME',
-      unit: UnitsService.deflectionUnit(),
-      isSettlement: true,
-    );
+    return _settlementChartCard();
   }
 
   Widget _buildVelocityChart() {
-    return _chartCard(
-      title: 'VELOCITY vs IMPACT TIME',
-      unit: UnitsService.velocityUnit(),
-      isSettlement: false,
-    );
+    return _velocityChartCard();
   }
 
-  Widget _chartCard({
-    required String title,
-    required String unit,
-    required bool isSettlement,
-  }) {
-    double maxY = 0.01;
-    double minY = 0;
+  // ============================================================
+  //  INVERSE CONE SETTLEMENT CHART
+  // ============================================================
+  Widget _settlementChartCard() {
+    double maxSettle = 0;
     double maxX = 1;
     bool hasData = false;
 
     for (final d in group.drops) {
-      final data = isSettlement
-          ? d.settlementCurve.map((v) => -v).toList()  // INVERT settlement
-          : d.velocityCurve;
-      if (data.isEmpty) continue;
-      hasData = true;
-      for (final v in data) {
-        if (v > maxY) maxY = v;
-        if (v < minY) minY = v;
+      if (d.settlementCurve.isNotEmpty) hasData = true;
+      for (final v in d.settlementCurve) {
+        if (v.abs() > maxSettle) maxSettle = v.abs();
       }
-      if (d.impactTimeCurve.isNotEmpty) {
-        final tmax =
-            d.impactTimeCurve.reduce((a, b) => a > b ? a : b);
-        if (tmax > maxX) maxX = tmax;
-      } else if (data.length > maxX) {
-        maxX = data.length.toDouble();
+      for (final t in d.impactTimeCurve) {
+        if (t > maxX) maxX = t;
       }
     }
 
-    final pad = (maxY - minY) * 0.15;
-    maxY += pad;
-    minY -= pad;
+    if (maxSettle == 0) maxSettle = 0.1;
+
+    final double chartMaxY = maxSettle * 0.15;
+    final double chartMinY = -maxSettle * 1.15;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -227,7 +209,8 @@ class TestGroupDetailPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
+          Text(
+              'SETTLEMENT vs IMPACT TIME (${UnitsService.deflectionUnit()})',
               style: const TextStyle(
                   color: Colors.grey,
                   fontSize: 10,
@@ -235,7 +218,7 @@ class TestGroupDetailPage extends StatelessWidget {
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           SizedBox(
-            height: 220,
+            height: 240,
             child: !hasData
                 ? Center(
                     child: Text('No curve data',
@@ -246,11 +229,13 @@ class TestGroupDetailPage extends StatelessWidget {
                       gridData: FlGridData(
                         show: true,
                         drawVerticalLine: false,
-                        horizontalInterval:
-                            ((maxY - minY) / 4).clamp(0.01, 100),
-                        getDrawingHorizontalLine: (_) => FlLine(
-                          color: Colors.grey.shade900,
-                          strokeWidth: 1,
+                        horizontalInterval: maxSettle / 3,
+                        getDrawingHorizontalLine: (value) => FlLine(
+                          color: value == 0
+                              ? Colors.white.withOpacity(0.5)
+                              : Colors.grey.shade900,
+                          strokeWidth: value == 0 ? 1.5 : 1,
+                          dashArray: value == 0 ? [4, 4] : null,
                         ),
                       ),
                       titlesData: FlTitlesData(
@@ -263,8 +248,7 @@ class TestGroupDetailPage extends StatelessWidget {
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: 24,
-                            interval:
-                                (maxX / 4).clamp(1, 1000).toDouble(),
+                            interval: (maxX / 4).clamp(1, 1000).toDouble(),
                             getTitlesWidget: (v, _) => Text(
                               v.toStringAsFixed(0),
                               style: TextStyle(
@@ -276,9 +260,168 @@ class TestGroupDetailPage extends StatelessWidget {
                         leftTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
-                            reservedSize: 48,
-                            interval:
-                                ((maxY - minY) / 4).clamp(0.01, 100),
+                            reservedSize: 44,
+                            interval: maxSettle / 3,
+                            getTitlesWidget: (v, _) => Text(
+                              v.abs().toStringAsFixed(2),
+                              style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 9),
+                            ),
+                          ),
+                        ),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      minX: 0,
+                      maxX: maxX,
+                      minY: chartMinY,
+                      maxY: chartMaxY,
+                      lineBarsData: group.drops
+                          .asMap()
+                          .entries
+                          .where((e) => e.value.settlementCurve.isNotEmpty)
+                          .map((e) {
+                        final d = e.value;
+                        final idx = e.key;
+                        final spots = <FlSpot>[];
+                        for (int i = 0; i < d.settlementCurve.length; i++) {
+                          final x = (d.impactTimeCurve.length > i)
+                              ? d.impactTimeCurve[i]
+                              : i.toDouble();
+                          // INVERSE - going down
+                          spots.add(
+                              FlSpot(x, -d.settlementCurve[i].abs()));
+                        }
+                        return LineChartBarData(
+                          spots: spots,
+                          isCurved: true,
+                          curveSmoothness: 0.25,
+                          color: _colorForIndex(idx),
+                          barWidth: 2.5,
+                          dotData: const FlDotData(show: false),
+                          belowBarData: BarAreaData(
+                            show: true,
+                            color:
+                                _colorForIndex(idx).withOpacity(0.15),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(group.drops.length, (i) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  children: [
+                    Container(
+                        width: 14, height: 3, color: _colorForIndex(i)),
+                    const SizedBox(width: 4),
+                    Text('Drop ${i + 1}',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 10)),
+                  ],
+                ),
+              );
+            }),
+          ),
+          Center(
+            child: Text(
+                'Impact time (ms)  /  ${UnitsService.deflectionUnit()}',
+                style:
+                    TextStyle(color: Colors.grey.shade600, fontSize: 9)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  //  VELOCITY vs IMPACT TIME CHART
+  // ============================================================
+  Widget _velocityChartCard() {
+    double maxVel = 0;
+    double maxX = 1;
+    bool hasData = false;
+
+    for (final d in group.drops) {
+      if (d.velocityCurve.isNotEmpty) hasData = true;
+      for (final v in d.velocityCurve) {
+        if (v.abs() > maxVel) maxVel = v.abs();
+      }
+      for (final t in d.impactTimeCurve) {
+        if (t > maxX) maxX = t;
+      }
+    }
+
+    if (maxVel == 0) maxVel = 0.1;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151B2E),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF2A3654)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+              'VELOCITY vs IMPACT TIME (${UnitsService.velocityUnit()})',
+              style: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 10,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 220,
+            child: !hasData
+                ? Center(
+                    child: Text('No velocity curve data',
+                        style: TextStyle(
+                            color: Colors.grey.shade600, fontSize: 12)))
+                : LineChart(
+                    LineChartData(
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                        horizontalInterval: maxVel / 4,
+                        getDrawingHorizontalLine: (value) => FlLine(
+                          color: value == 0
+                              ? Colors.white.withOpacity(0.5)
+                              : Colors.grey.shade900,
+                          strokeWidth: value == 0 ? 1.5 : 1,
+                          dashArray: value == 0 ? [4, 4] : null,
+                        ),
+                      ),
+                      titlesData: FlTitlesData(
+                        show: true,
+                        topTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(
+                            sideTitles: SideTitles(showTitles: false)),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 24,
+                            interval: (maxX / 4).clamp(1, 1000).toDouble(),
+                            getTitlesWidget: (v, _) => Text(
+                              v.toStringAsFixed(0),
+                              style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 9),
+                            ),
+                          ),
+                        ),
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 44,
+                            interval: maxVel / 4,
                             getTitlesWidget: (v, _) => Text(
                               v.toStringAsFixed(2),
                               style: TextStyle(
@@ -291,41 +434,26 @@ class TestGroupDetailPage extends StatelessWidget {
                       borderData: FlBorderData(show: false),
                       minX: 0,
                       maxX: maxX,
-                      minY: minY,
-                      maxY: maxY,
+                      minY: -maxVel * 1.15,
+                      maxY: maxVel * 1.15,
                       lineBarsData: group.drops
                           .asMap()
                           .entries
-                          .where((e) {
-                            final data = isSettlement
-                                ? e.value.settlementCurve
-                                : e.value.velocityCurve;
-                            return data.isNotEmpty;
-                          })
+                          .where((e) => e.value.velocityCurve.isNotEmpty)
                           .map((e) {
                         final d = e.value;
                         final idx = e.key;
-                        final rawData = isSettlement
-                            ? d.settlementCurve
-                            : d.velocityCurve;
-                        // INVERT settlement
-                        final data = isSettlement
-                            ? rawData.map((v) => -v).toList()
-                            : rawData;
-                        final timeData = d.impactTimeCurve;
-
                         final spots = <FlSpot>[];
-                        for (int i = 0; i < data.length; i++) {
-                          final x = (timeData.length > i)
-                              ? timeData[i]
+                        for (int i = 0; i < d.velocityCurve.length; i++) {
+                          final x = (d.impactTimeCurve.length > i)
+                              ? d.impactTimeCurve[i]
                               : i.toDouble();
-                          spots.add(FlSpot(x, data[i]));
+                          spots.add(FlSpot(x, d.velocityCurve[i]));
                         }
-
                         return LineChartBarData(
                           spots: spots,
                           isCurved: true,
-                          curveSmoothness: 0.2,
+                          curveSmoothness: 0.25,
                           color: _colorForIndex(idx),
                           barWidth: 2.5,
                           dotData: const FlDotData(show: false),
@@ -354,9 +482,10 @@ class TestGroupDetailPage extends StatelessWidget {
             }),
           ),
           Center(
-            child: Text('Impact time (ms)  /  $unit',
-                style: TextStyle(
-                    color: Colors.grey.shade600, fontSize: 9)),
+            child: Text(
+                'Impact time (ms)  /  ${UnitsService.velocityUnit()}',
+                style:
+                    TextStyle(color: Colors.grey.shade600, fontSize: 9)),
           ),
         ],
       ),
@@ -388,11 +517,11 @@ class TestGroupDetailPage extends StatelessWidget {
                   color: const Color(0xFF2A3654), width: 1),
               columnWidths: const {
                 0: FixedColumnWidth(70),
-                1: FixedColumnWidth(90),
-                2: FixedColumnWidth(90),
-                3: FixedColumnWidth(90),
+                1: FixedColumnWidth(95),
+                2: FixedColumnWidth(95),
+                3: FixedColumnWidth(95),
                 4: FixedColumnWidth(80),
-                5: FixedColumnWidth(90),
+                5: FixedColumnWidth(85),
               },
               children: [
                 _tableHeader([
@@ -409,8 +538,7 @@ class TestGroupDetailPage extends StatelessWidget {
                     'Test ${e.key + 1}',
                     UnitsService.deflection(d.deflection)
                         .toStringAsFixed(3),
-                    UnitsService.velocity(d.velocity)
-                        .toStringAsFixed(3),
+                    UnitsService.velocity(d.velocity).toStringAsFixed(3),
                     UnitsService.evd(d.evd).toStringAsFixed(2),
                     d.acceleration.toStringAsFixed(3),
                     d.sOverV.toStringAsFixed(3),
