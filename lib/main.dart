@@ -1,4 +1,3 @@
-import 'services/units_service.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +11,7 @@ import 'services/storage_service.dart';
 import 'services/ble_service.dart';
 import 'services/gps_service.dart';
 import 'services/voice_service.dart';
+import 'services/units_service.dart';
 import 'widgets/magic_eye.dart';
 import 'screens/user_profile_page.dart';
 import 'screens/project_settings_page.dart';
@@ -54,9 +54,6 @@ class HmpProApp extends StatelessWidget {
   }
 }
 
-// ============================================================
-//  SPLASH SCREEN
-// ============================================================
 class SplashScreen extends StatefulWidget {
   final Widget child;
   const SplashScreen({super.key, required this.child});
@@ -154,9 +151,6 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-// ============================================================
-//  HOME PAGE
-// ============================================================
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -189,12 +183,13 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription? _bleConnSub;
   StreamSubscription? _gpsSub;
 
+  double _lastEvd = 0;
+  double _lastDef = 0;
+  double _lastAcc = 0;
+  double _lastVel = 0;
+
   Timer? _clockTimer;
   Timer? _batteryTimer;
-  Timer? _screenTimer;
-  bool _screenDimmed = false;
-  DateTime _lastInteraction = DateTime.now();
-
   String? _errorMessage;
   bool _initialized = false;
 
@@ -208,36 +203,15 @@ class _HomePageState extends State<HomePage> {
     _batteryTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _refreshBattery();
     });
-    // Screen timeout check every 5 seconds
-    _screenTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      _checkScreenTimeout();
-    });
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
     _batteryTimer?.cancel();
-    _screenTimer?.cancel();
     _bleConnSub?.cancel();
     _gpsSub?.cancel();
     super.dispose();
-  }
-
-  void _checkScreenTimeout() {
-    if (!mounted) return;
-    final idle = DateTime.now().difference(_lastInteraction).inSeconds;
-    if (idle >= 180 && !_screenDimmed) {
-      // 3 minutes idle
-      setState(() => _screenDimmed = true);
-    }
-  }
-
-  void _onInteraction() {
-    _lastInteraction = DateTime.now();
-    if (_screenDimmed) {
-      setState(() => _screenDimmed = false);
-    }
   }
 
   Future<void> _init() async {
@@ -292,6 +266,16 @@ class _HomePageState extends State<HomePage> {
                     ? MagicEyeState.green
                     : MagicEyeState.blue)
                 : MagicEyeState.red;
+          });
+        });
+        _ble.dataStream.listen((m) {
+          final type = m['type'] as String?;
+          if (type == 'hb') return;
+          setState(() {
+            _lastEvd = (m['evd'] ?? 0).toDouble() * _calibration.factor;
+            _lastDef = (m['def'] ?? 0).toDouble();
+            _lastAcc = (m['acc'] ?? 0).toDouble();
+            _lastVel = (m['vel'] ?? 0).toDouble();
           });
         });
       } catch (e) {
@@ -352,30 +336,6 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // Screen dimmed overlay
-    if (_screenDimmed) {
-      return GestureDetector(
-        onTap: _onInteraction,
-        onPanUpdate: (_) => _onInteraction(),
-        child: Container(
-          color: Colors.black,
-          child: const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.touch_app, color: Colors.white24, size: 60),
-                SizedBox(height: 16),
-                Text(
-                  'Touch to wake',
-                  style: TextStyle(color: Colors.white24, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
     if (_errorMessage != null) {
       return Scaffold(
         backgroundColor: const Color(0xFF0A0E1A),
@@ -395,20 +355,15 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    // Wrap everything with Listener for interaction tracking
-    return Listener(
-      onPointerDown: (_) => _onInteraction(),
-      onPointerMove: (_) => _onInteraction(),
-      child: Scaffold(
-        drawer: _buildSettingsDrawer(),
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildUpperZone(),
-              Expanded(child: _buildCentralZone()),
-              _buildLowerZone(),
-            ],
-          ),
+    return Scaffold(
+      drawer: _buildSettingsDrawer(),
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildUpperZone(),
+            Expanded(child: _buildCentralZone()),
+            _buildLowerZone(),
+          ],
         ),
       ),
     );
@@ -562,6 +517,8 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           const SizedBox(height: 12),
+          _buildLiveCard(),
+          const SizedBox(height: 10),
           _buildLastGroupMeansCard(),
           const SizedBox(height: 10),
           _buildEyeCard(),
@@ -658,9 +615,96 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // ============================================================
-  //  LAST GROUP MEANS CARD
-  // ============================================================
+  Widget _buildLiveCard() {
+    final passed = _lastEvd >= _dropSettings.targetEvd;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+            colors: [Color(0xFF151B2E), Color(0xFF1E2740)]),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: passed
+                ? Colors.green.withOpacity(0.4)
+                : const Color(0xFF2A3654)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('EVD',
+                  style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 10,
+                      letterSpacing: 1.5)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(UnitsService.evd(_lastEvd).toStringAsFixed(1),
+                      style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF00E5FF),
+                          fontFamily: 'monospace')),
+                  const SizedBox(width: 4),
+                  Text(UnitsService.evdUnit(),
+                      style: TextStyle(
+                          color: Colors.grey.shade500, fontSize: 12)),
+                ],
+              ),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('DEFL',
+                  style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 10,
+                      letterSpacing: 1.5)),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(UnitsService.deflection(_lastDef).toStringAsFixed(2),
+                      style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orangeAccent,
+                          fontFamily: 'monospace')),
+                  const SizedBox(width: 4),
+                  Text(UnitsService.deflectionUnit(),
+                      style: TextStyle(
+                          color: Colors.grey.shade500, fontSize: 10)),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(UnitsService.velocity(_lastVel).toStringAsFixed(2),
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.greenAccent,
+                          fontFamily: 'monospace')),
+                  const SizedBox(width: 4),
+                  Text(UnitsService.velocityUnit(),
+                      style: TextStyle(
+                          color: Colors.grey.shade500, fontSize: 9)),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLastGroupMeansCard() {
     final group = _lastCompletedGroup;
 
@@ -678,11 +722,8 @@ class _HomePageState extends State<HomePage> {
                 color: Colors.grey.shade700, size: 32),
             const SizedBox(height: 8),
             Text('No test completed yet',
-                style: TextStyle(
-                    color: Colors.grey.shade600, fontSize: 12)),
-            Text('Perform a 3-drop test to see results',
-                style: TextStyle(
-                    color: Colors.grey.shade700, fontSize: 10)),
+                style:
+                    TextStyle(color: Colors.grey.shade600, fontSize: 12)),
           ],
         ),
       );
@@ -718,18 +759,15 @@ class _HomePageState extends State<HomePage> {
                   color: passed ? Colors.greenAccent : Colors.redAccent,
                   size: 18),
               const SizedBox(width: 6),
-              Text(
-                passed ? 'VALID TEST' : 'INVALID TEST',
-                style: TextStyle(
-                  color: passed ? Colors.greenAccent : Colors.redAccent,
-                  fontSize: 12,
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text(passed ? 'VALID TEST' : 'INVALID TEST',
+                  style: TextStyle(
+                      color:
+                          passed ? Colors.greenAccent : Colors.redAccent,
+                      fontSize: 12,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.bold)),
               const Spacer(),
-              Text(
-                  DateFormat('HH:mm:ss').format(group.time),
+              Text(DateFormat('HH:mm:ss').format(group.time),
                   style: TextStyle(
                       color: Colors.grey.shade400, fontSize: 10)),
             ],
@@ -740,16 +778,17 @@ class _HomePageState extends State<HomePage> {
               Expanded(
                 child: _meanMetric(
                   'EVD MEAN',
-                  group.avgEvd.toStringAsFixed(1),
-                  'MN/m²',
+                  UnitsService.evd(group.avgEvd).toStringAsFixed(1),
+                  UnitsService.evdUnit(),
                   const Color(0xFF00E5FF),
                 ),
               ),
               Expanded(
                 child: _meanMetric(
                   'S MEAN',
-                  group.avgDeflection.toStringAsFixed(3),
-                  'mm',
+                  UnitsService.deflection(group.avgDeflection)
+                      .toStringAsFixed(2),
+                  UnitsService.deflectionUnit(),
                   Colors.orangeAccent,
                 ),
               ),
@@ -761,8 +800,9 @@ class _HomePageState extends State<HomePage> {
               Expanded(
                 child: _meanMetric(
                   'DEFL MEAN',
-                  group.avgDeflection.toStringAsFixed(3),
-                  'mm',
+                  UnitsService.deflection(group.avgDeflection)
+                      .toStringAsFixed(2),
+                  UnitsService.deflectionUnit(),
                   Colors.purpleAccent,
                 ),
               ),
@@ -803,8 +843,8 @@ class _HomePageState extends State<HomePage> {
                     fontFamily: 'monospace')),
             const SizedBox(width: 3),
             Text(unit,
-                style: TextStyle(
-                    color: Colors.grey.shade600, fontSize: 9)),
+                style:
+                    TextStyle(color: Colors.grey.shade600, fontSize: 9)),
           ],
         ),
       ],
@@ -1019,6 +1059,8 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _saveProfile(UserProfile p) async {
     await _storage.saveProfile(p);
+    UnitsService.setSystem(
+        p.useMetric ? UnitsService.METRIC : UnitsService.SI);
     setState(() => _profile = p);
     _snack('User profile saved successfully');
   }
@@ -1201,8 +1243,7 @@ class _HomePageState extends State<HomePage> {
   void _snack(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content: Text(m), duration: const Duration(seconds: 2)),
+      SnackBar(content: Text(m), duration: const Duration(seconds: 2)),
     );
   }
 }

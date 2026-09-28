@@ -41,7 +41,6 @@ class TestGroupDetailPage extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.picture_as_pdf),
-            tooltip: 'Export PDF report',
             onPressed: () async {
               final file = await ExportService.buildGroupPdf(
                 group,
@@ -56,7 +55,6 @@ class TestGroupDetailPage extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.file_download),
-            tooltip: 'Export CSV',
             onPressed: () async {
               final file = await ExportService.buildGroupCsv(
                 group,
@@ -78,9 +76,9 @@ class TestGroupDetailPage extends StatelessWidget {
           children: [
             _buildHeader(),
             const SizedBox(height: 16),
-            _buildSettlementChart(),
+            _settlementChartCard(),
             const SizedBox(height: 16),
-            _buildVelocityChart(),
+            _velocityChartCard(),
             const SizedBox(height: 16),
             _buildDataTable(),
             const SizedBox(height: 16),
@@ -168,17 +166,39 @@ class TestGroupDetailPage extends StatelessWidget {
     );
   }
 
-  Widget _buildSettlementChart() {
-    return _settlementChartCard();
+  List<FlSpot> _buildHmpSpots(Drop d) {
+    if (d.settlementCurve.isEmpty) return [];
+
+    final times = d.impactTimeCurve.isNotEmpty
+        ? d.impactTimeCurve
+        : List<double>.generate(
+            d.settlementCurve.length, (i) => i * 25.0);
+
+    final n = d.settlementCurve.length;
+    if (n < 2) return [];
+
+    final first = d.settlementCurve.first;
+    final last = d.settlementCurve.last;
+
+    final spots = <FlSpot>[];
+    spots.add(const FlSpot(0, 0));
+
+    for (int i = 0; i < n; i++) {
+      final t = i / (n - 1);
+      final correction = first * (1 - t) + last * t;
+      final corrected = (d.settlementCurve[i] - correction).abs();
+      final x = i < times.length ? times[i] : i * 25.0;
+      spots.add(FlSpot(x, -corrected));
+    }
+
+    final lastTime = times.isNotEmpty ? times.last : (n - 1).toDouble();
+    if (lastTime > 0) {
+      spots.add(FlSpot(lastTime, 0));
+    }
+
+    return spots;
   }
 
-  Widget _buildVelocityChart() {
-    return _velocityChartCard();
-  }
-
-  // ============================================================
-  //  INVERSE CONE SETTLEMENT CHART
-  // ============================================================
   Widget _settlementChartCard() {
     double maxSettle = 0;
     double maxX = 1;
@@ -196,7 +216,7 @@ class TestGroupDetailPage extends StatelessWidget {
 
     if (maxSettle == 0) maxSettle = 0.1;
 
-    final double chartMaxY = maxSettle * 0.15;
+    final double chartMaxY = maxSettle * 0.25;
     final double chartMinY = -maxSettle * 1.15;
 
     return Container(
@@ -218,7 +238,7 @@ class TestGroupDetailPage extends StatelessWidget {
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
           SizedBox(
-            height: 240,
+            height: 260,
             child: !hasData
                 ? Center(
                     child: Text('No curve data',
@@ -232,7 +252,7 @@ class TestGroupDetailPage extends StatelessWidget {
                         horizontalInterval: maxSettle / 3,
                         getDrawingHorizontalLine: (value) => FlLine(
                           color: value == 0
-                              ? Colors.white.withOpacity(0.5)
+                              ? Colors.white.withOpacity(0.6)
                               : Colors.grey.shade900,
                           strokeWidth: value == 0 ? 1.5 : 1,
                           dashArray: value == 0 ? [4, 4] : null,
@@ -276,33 +296,17 @@ class TestGroupDetailPage extends StatelessWidget {
                       maxX: maxX,
                       minY: chartMinY,
                       maxY: chartMaxY,
-                      lineBarsData: group.drops
-                          .asMap()
-                          .entries
-                          .where((e) => e.value.settlementCurve.isNotEmpty)
-                          .map((e) {
-                        final d = e.value;
-                        final idx = e.key;
-                        final spots = <FlSpot>[];
-                        for (int i = 0; i < d.settlementCurve.length; i++) {
-                          final x = (d.impactTimeCurve.length > i)
-                              ? d.impactTimeCurve[i]
-                              : i.toDouble();
-                          // INVERSE - going down
-                          spots.add(
-                              FlSpot(x, -d.settlementCurve[i].abs()));
-                        }
+                      lineBarsData: group.drops.asMap().entries.map((e) {
                         return LineChartBarData(
-                          spots: spots,
+                          spots: _buildHmpSpots(e.value),
                           isCurved: true,
-                          curveSmoothness: 0.25,
-                          color: _colorForIndex(idx),
+                          curveSmoothness: 0.3,
+                          color: _colorForIndex(e.key),
                           barWidth: 2.5,
                           dotData: const FlDotData(show: false),
                           belowBarData: BarAreaData(
                             show: true,
-                            color:
-                                _colorForIndex(idx).withOpacity(0.15),
+                            color: _colorForIndex(e.key).withOpacity(0.15),
                           ),
                         );
                       }).toList(),
@@ -339,9 +343,6 @@ class TestGroupDetailPage extends StatelessWidget {
     );
   }
 
-  // ============================================================
-  //  VELOCITY vs IMPACT TIME CHART
-  // ============================================================
   Widget _velocityChartCard() {
     double maxVel = 0;
     double maxX = 1;
@@ -392,7 +393,7 @@ class TestGroupDetailPage extends StatelessWidget {
                         horizontalInterval: maxVel / 4,
                         getDrawingHorizontalLine: (value) => FlLine(
                           color: value == 0
-                              ? Colors.white.withOpacity(0.5)
+                              ? Colors.white.withOpacity(0.6)
                               : Colors.grey.shade900,
                           strokeWidth: value == 0 ? 1.5 : 1,
                           dashArray: value == 0 ? [4, 4] : null,
@@ -442,7 +443,6 @@ class TestGroupDetailPage extends StatelessWidget {
                           .where((e) => e.value.velocityCurve.isNotEmpty)
                           .map((e) {
                         final d = e.value;
-                        final idx = e.key;
                         final spots = <FlSpot>[];
                         for (int i = 0; i < d.velocityCurve.length; i++) {
                           final x = (d.impactTimeCurve.length > i)
@@ -454,7 +454,7 @@ class TestGroupDetailPage extends StatelessWidget {
                           spots: spots,
                           isCurved: true,
                           curveSmoothness: 0.25,
-                          color: _colorForIndex(idx),
+                          color: _colorForIndex(e.key),
                           barWidth: 2.5,
                           dotData: const FlDotData(show: false),
                         );
@@ -583,9 +583,8 @@ class TestGroupDetailPage extends StatelessWidget {
               const SizedBox(width: 8),
               Text(passed ? 'VALID TEST' : 'INVALID TEST',
                   style: TextStyle(
-                      color: passed
-                          ? Colors.greenAccent
-                          : Colors.redAccent,
+                      color:
+                          passed ? Colors.greenAccent : Colors.redAccent,
                       fontSize: 11,
                       letterSpacing: 1.5,
                       fontWeight: FontWeight.bold)),

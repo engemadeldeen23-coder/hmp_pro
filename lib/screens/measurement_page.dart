@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:intl/intl.dart';
 import '../models/models.dart';
 import '../services/ble_service.dart';
 import '../services/gps_service.dart';
@@ -130,7 +129,6 @@ class _MeasurementPageState extends State<MeasurementPage> {
     if (_busy) return;
     _busy = true;
 
-    // Parse curve data from ESP32
     List<double> curveT = [];
     List<double> curveD = [];
     List<double> curveV = [];
@@ -198,8 +196,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
       }
     } else {
       setState(() => _stage = MeasurementStage.idle);
-      widget.voice
-          .say('Test ${_testIndex + 1} complete. EVD ${_currentEvd.round()}');
+      widget.voice.say('Test ${_testIndex + 1} complete');
       _testIndex++;
 
       if (_testIndex >= _testCount) {
@@ -210,8 +207,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
         setState(() => _stage = MeasurementStage.complete);
 
         if (_testValid) {
-          widget.voice.say(
-              'Successful test. Average EVD ${_avgEvd.round()}');
+          widget.voice.say('Successful test');
         } else {
           widget.voice.say('Fail test');
         }
@@ -405,27 +401,15 @@ class _MeasurementPageState extends State<MeasurementPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _metric(
-            'EVD',
-            UnitsService.evd(_currentEvd).toStringAsFixed(1),
-            UnitsService.evdUnit(),
-            const Color(0xFF00E5FF),
-            20,
-          ),
-          _metric(
-            'DEFL',
-            UnitsService.deflection(_currentDef).toStringAsFixed(2),
-            UnitsService.deflectionUnit(),
-            Colors.orangeAccent,
-            14,
-          ),
-          _metric(
-            'VEL',
-            UnitsService.velocity(_currentVel).toStringAsFixed(2),
-            UnitsService.velocityUnit(),
-            Colors.greenAccent,
-            12,
-          ),
+          _metric('EVD',
+              UnitsService.evd(_currentEvd).toStringAsFixed(1),
+              UnitsService.evdUnit(), const Color(0xFF00E5FF), 20),
+          _metric('DEFL',
+              UnitsService.deflection(_currentDef).toStringAsFixed(2),
+              UnitsService.deflectionUnit(), Colors.orangeAccent, 14),
+          _metric('VEL',
+              UnitsService.velocity(_currentVel).toStringAsFixed(2),
+              UnitsService.velocityUnit(), Colors.greenAccent, 12),
           _metric('ACC', _currentAcc.toStringAsFixed(2), 'g',
               Colors.purpleAccent, 12),
         ],
@@ -523,7 +507,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
             ],
           ),
           const SizedBox(height: 8),
-          Expanded(child: _buildMultiCurveChart()),
+          Expanded(child: _buildHmpStyleChart()),
         ],
       ),
     );
@@ -539,9 +523,43 @@ class _MeasurementPageState extends State<MeasurementPage> {
   }
 
   // ============================================================
-  //  INVERSE CONE SETTLEMENT CHART (TerraTest style)
+  //  HMP GL4-STYLE CURVE BUILDER
+  //  Forces start=(0,0) and end=(maxTime,0), dips downward
   // ============================================================
-  Widget _buildMultiCurveChart() {
+  List<FlSpot> _buildHmpSpots(Drop d) {
+    if (d.settlementCurve.isEmpty) return [];
+
+    final times = d.impactTimeCurve.isNotEmpty
+        ? d.impactTimeCurve
+        : List<double>.generate(
+            d.settlementCurve.length, (i) => i * 25.0);
+
+    final n = d.settlementCurve.length;
+    if (n < 2) return [];
+
+    final first = d.settlementCurve.first;
+    final last = d.settlementCurve.last;
+
+    final spots = <FlSpot>[];
+    spots.add(const FlSpot(0, 0));
+
+    for (int i = 0; i < n; i++) {
+      final t = i / (n - 1);
+      final correction = first * (1 - t) + last * t;
+      final corrected = (d.settlementCurve[i] - correction).abs();
+      final x = i < times.length ? times[i] : i * 25.0;
+      spots.add(FlSpot(x, -corrected));
+    }
+
+    final lastTime = times.isNotEmpty ? times.last : (n - 1).toDouble();
+    if (lastTime > 0) {
+      spots.add(FlSpot(lastTime, 0));
+    }
+
+    return spots;
+  }
+
+  Widget _buildHmpStyleChart() {
     if (_testDrops.isEmpty) {
       return Center(
         child: Text(
@@ -553,9 +571,9 @@ class _MeasurementPageState extends State<MeasurementPage> {
       );
     }
 
-    // Compute max settlement across all drops
     double maxSettle = 0;
     double maxX = 1;
+
     for (final d in _testDrops) {
       for (final v in d.settlementCurve) {
         if (v.abs() > maxSettle) maxSettle = v.abs();
@@ -566,20 +584,20 @@ class _MeasurementPageState extends State<MeasurementPage> {
       }
     }
 
-    // INVERSE CONE: chart goes from y=0 (top) down to y=-maxSettle (bottom)
-    // 15% padding at bottom
-    final double chartMaxY = maxSettle * 0.15;   // some space above 0
-    final double chartMinY = -maxSettle * 1.15;  // extra space below
+    if (maxSettle == 0) maxSettle = 0.1;
+
+    final double chartMaxY = maxSettle * 0.25;
+    final double chartMinY = -maxSettle * 1.15;
 
     return LineChart(
       LineChartData(
         gridData: FlGridData(
           show: true,
           drawVerticalLine: false,
-          horizontalInterval: maxSettle / 3 > 0 ? maxSettle / 3 : 0.1,
+          horizontalInterval: maxSettle / 3,
           getDrawingHorizontalLine: (value) => FlLine(
             color: value == 0
-                ? Colors.white.withOpacity(0.5) // Reference line at 0
+                ? Colors.white.withOpacity(0.6)
                 : Colors.grey.shade900,
             strokeWidth: value == 0 ? 1.5 : 1,
             dashArray: value == 0 ? [4, 4] : null,
@@ -598,8 +616,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
               interval: (maxX / 4).clamp(1, 1000).toDouble(),
               getTitlesWidget: (v, _) => Text(
                 v.toStringAsFixed(0),
-                style:
-                    TextStyle(color: Colors.grey.shade600, fontSize: 8),
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 8),
               ),
             ),
           ),
@@ -607,15 +624,11 @@ class _MeasurementPageState extends State<MeasurementPage> {
             sideTitles: SideTitles(
               showTitles: true,
               reservedSize: 40,
-              interval: maxSettle / 3 > 0 ? maxSettle / 3 : 0.1,
-              getTitlesWidget: (v, _) {
-                // Display absolute value so bottom shows positive numbers
-                return Text(
-                  v.abs().toStringAsFixed(2),
-                  style:
-                      TextStyle(color: Colors.grey.shade600, fontSize: 8),
-                );
-              },
+              interval: maxSettle / 3,
+              getTitlesWidget: (v, _) => Text(
+                v.abs().toStringAsFixed(2),
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 8),
+              ),
             ),
           ),
         ),
@@ -624,25 +637,13 @@ class _MeasurementPageState extends State<MeasurementPage> {
         maxX: maxX,
         minY: chartMinY,
         maxY: chartMaxY,
-        lineBarsData: _testDrops
-            .asMap()
-            .entries
-            .where((e) => e.value.settlementCurve.isNotEmpty)
-            .map((e) {
+        lineBarsData: _testDrops.asMap().entries.map((e) {
           final d = e.value;
           final idx = e.key;
-          final spots = <FlSpot>[];
-          for (int i = 0; i < d.settlementCurve.length; i++) {
-            final x = (d.impactTimeCurve.length > i)
-                ? d.impactTimeCurve[i]
-                : i.toDouble();
-            // INVERSE: plot as negative so curve dips down
-            spots.add(FlSpot(x, -d.settlementCurve[i].abs()));
-          }
           return LineChartBarData(
-            spots: spots,
+            spots: _buildHmpSpots(d),
             isCurved: true,
-            curveSmoothness: 0.25,
+            curveSmoothness: 0.3,
             color: _colorForIndex(idx),
             barWidth: 2.5,
             dotData: const FlDotData(show: false),
