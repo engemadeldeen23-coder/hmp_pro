@@ -13,7 +13,7 @@ class TestGroupDetailPage extends StatelessWidget {
   final String jobName;
   final String locationName;
 
-  static const double _trimThreshold = 0.20;  // 20% - slightly wider
+  static const double _trimThreshold = 0.15;
 
   const TestGroupDetailPage({
     super.key,
@@ -169,34 +169,40 @@ class TestGroupDetailPage extends StatelessWidget {
   }
 
   // ============================================================
-  //  TIGHT CONE: [startIdx, endIdx] where settlement > 30% of max
+  //  SEMI-SYMMETRIC CONE: [startIdx, endIdx] around peak
   // ============================================================
   List<int> _getImpactRange(Drop d) {
     final n = d.settlementCurve.length;
     if (n < 2) return [0, 0];
 
     double maxSettle = 0;
-    for (final v in d.settlementCurve) {
-      if (v.abs() > maxSettle) maxSettle = v.abs();
+    int peakIdx = 0;
+    for (int i = 0; i < n; i++) {
+      if (d.settlementCurve[i].abs() > maxSettle) {
+        maxSettle = d.settlementCurve[i].abs();
+        peakIdx = i;
+      }
     }
     if (maxSettle == 0) return [0, n - 1];
 
     final threshold = maxSettle * _trimThreshold;
 
-    int startIdx = 0;
-    for (int i = 0; i < n; i++) {
-      if (d.settlementCurve[i].abs() >= threshold) {
+    int startIdx = peakIdx;
+    for (int i = peakIdx; i >= 0; i--) {
+      if (d.settlementCurve[i].abs() < threshold) {
         startIdx = i;
         break;
       }
+      if (i == 0) startIdx = 0;
     }
 
-    int endIdx = n - 1;
-    for (int i = n - 1; i >= 0; i--) {
-      if (d.settlementCurve[i].abs() >= threshold) {
+    int endIdx = peakIdx;
+    for (int i = peakIdx; i < n; i++) {
+      if (d.settlementCurve[i].abs() < threshold) {
         endIdx = i;
         break;
       }
+      if (i == n - 1) endIdx = n - 1;
     }
 
     if (endIdx <= startIdx) {
@@ -221,24 +227,24 @@ class TestGroupDetailPage extends StatelessWidget {
         : List<double>.generate(n, (i) => i * 25.0);
 
     final spots = <FlSpot>[];
-    spots.add(const FlSpot(0, 0));
+    final tStart = startIdx < times.length ? times[startIdx] : 0.0;
+    spots.add(FlSpot(tStart, 0));
 
     for (int i = startIdx; i <= endIdx; i++) {
       final x = i < times.length ? times[i] : i * 25.0;
       spots.add(FlSpot(x, -d.settlementCurve[i].abs()));
     }
 
-    final lastTime = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
-    if (lastTime > 0) {
-      spots.add(FlSpot(lastTime, 0));
-    }
+    final tEnd = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
+    spots.add(FlSpot(tEnd, 0));
 
     return spots;
   }
 
   Widget _settlementChartCard() {
     double maxSettle = 0;
-    double maxX = 1;
+    double minX = double.infinity;
+    double maxX = 0;
     bool hasData = false;
 
     for (final d in group.drops) {
@@ -251,17 +257,19 @@ class TestGroupDetailPage extends StatelessWidget {
       if (localMaxSettle > maxSettle) maxSettle = localMaxSettle;
 
       final range = _getImpactRange(d);
-      final endIdx = range[1];
       final times = d.impactTimeCurve.isNotEmpty
           ? d.impactTimeCurve
           : List<double>.generate(
               d.settlementCurve.length, (i) => i * 25.0);
-      final t = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
-      if (t > maxX) maxX = t;
+      final tStart = range[0] < times.length ? times[range[0]] : 0.0;
+      final tEnd = range[1] < times.length ? times[range[1]] : 0.0;
+      if (tStart < minX) minX = tStart;
+      if (tEnd > maxX) maxX = tEnd;
     }
 
     if (maxSettle == 0) maxSettle = 0.1;
-    if (maxX <= 0) maxX = 1;
+    if (minX == double.infinity) minX = 0;
+    if (maxX <= minX) maxX = minX + 100;
 
     final double chartMaxY = maxSettle * 0.25;
     final double chartMinY = -maxSettle * 1.15;
@@ -315,7 +323,8 @@ class TestGroupDetailPage extends StatelessWidget {
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: 24,
-                            interval: (maxX / 4).clamp(0.5, 1000).toDouble(),
+                            interval:
+                                ((maxX - minX) / 4).clamp(0.5, 1000).toDouble(),
                             getTitlesWidget: (v, _) => Text(
                               v.toStringAsFixed(0),
                               style: TextStyle(
@@ -339,7 +348,7 @@ class TestGroupDetailPage extends StatelessWidget {
                         ),
                       ),
                       borderData: FlBorderData(show: false),
-                      minX: 0,
+                      minX: minX,
                       maxX: maxX,
                       minY: chartMinY,
                       maxY: chartMaxY,
@@ -392,7 +401,8 @@ class TestGroupDetailPage extends StatelessWidget {
 
   Widget _velocityChartCard() {
     double maxVel = 0;
-    double maxX = 1;
+    double minX = double.infinity;
+    double maxX = 0;
     bool hasData = false;
 
     for (final d in group.drops) {
@@ -401,17 +411,19 @@ class TestGroupDetailPage extends StatelessWidget {
         if (v.abs() > maxVel) maxVel = v.abs();
       }
       final range = _getImpactRange(d);
-      final endIdx = range[1];
       final times = d.impactTimeCurve.isNotEmpty
           ? d.impactTimeCurve
           : List<double>.generate(
               d.settlementCurve.length, (i) => i * 25.0);
-      final t = endIdx < times.length ? times[endIdx] : endIdx * 25.0;
-      if (t > maxX) maxX = t;
+      final tStart = range[0] < times.length ? times[range[0]] : 0.0;
+      final tEnd = range[1] < times.length ? times[range[1]] : 0.0;
+      if (tStart < minX) minX = tStart;
+      if (tEnd > maxX) maxX = tEnd;
     }
 
     if (maxVel == 0) maxVel = 0.1;
-    if (maxX <= 0) maxX = 1;
+    if (minX == double.infinity) minX = 0;
+    if (maxX <= minX) maxX = minX + 100;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -462,7 +474,8 @@ class TestGroupDetailPage extends StatelessWidget {
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: 24,
-                            interval: (maxX / 4).clamp(0.5, 1000).toDouble(),
+                            interval:
+                                ((maxX - minX) / 4).clamp(0.5, 1000).toDouble(),
                             getTitlesWidget: (v, _) => Text(
                               v.toStringAsFixed(0),
                               style: TextStyle(
@@ -486,7 +499,7 @@ class TestGroupDetailPage extends StatelessWidget {
                         ),
                       ),
                       borderData: FlBorderData(show: false),
-                      minX: 0,
+                      minX: minX,
                       maxX: maxX,
                       minY: -maxVel * 1.15,
                       maxY: maxVel * 1.15,
