@@ -1,8 +1,7 @@
 name: hmp_pro
 description: HMP PRO - Industrial Light Weight Deflectometer
 publish_to: 'none'
-version: 3.4.0+24
-
+version: 3.4.0+25
 environment:
   sdk: ">=3.0.0 <4.0.0"
 

@@ -59,7 +59,7 @@ class _MeasurementPageState extends State<MeasurementPage> {
   static const int _testCount = 3;
 
   // Threshold: 15% of peak → clips curve to impact period only (semi-symmetric cone)
-  static const double _trimThreshold = 0.15;
+   static const double _trimThreshold = 0.25;
 
   late Location _location;
 
